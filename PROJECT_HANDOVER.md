@@ -51,7 +51,7 @@ The original listener only processed text frames, so it missed this acknowledgem
 
 ### Hide raw server diagnostics
 
-The app initially displayed a `GOOGLE RESPONSE: ...` diagnostic in its status area. That exposed protocol messages such as session-resumption handles. The raw payload display was removed. User-facing errors are now generic, while useful states such as `JARVIS LIVE — LISTENING` remain visible.
+The app initially displayed a `GOOGLE RESPONSE: ...` diagnostic in its status area. That exposed protocol messages such as session-resumption handles. The raw payload display was removed. User-facing errors are now generic, while useful states such as `MARK LIVE — LISTENING` remain visible.
 
 ### Media-volume routing
 
@@ -82,7 +82,7 @@ When a sensitive action is blocked, `LiveVoiceManager` also speaks a local Andro
 
 ### Background voice listening
 
-Voice mode is owned by `JarvisVoiceForegroundService`, not `MainActivity`, so it can continue while another app is in the foreground. The service starts only from the visible JARVIS activity after microphone permission is granted, declares the Android microphone foreground-service type, shows an ongoing low-priority notification, and provides a notification STOP action. MainActivity receives private in-app broadcasts for status and recognized speech while it is visible, but leaving the activity does not release the voice manager. The user can stop listening from the JARVIS button or the notification. Android may still reclaim services under severe system pressure, and the persistent notification is intentionally required for microphone privacy.
+Voice mode is owned by `JarvisVoiceForegroundService`, not `MainActivity`, so it can continue while another app is in the foreground. The service starts only from the visible MARK activity after microphone permission is granted, declares the Android microphone foreground-service type, shows an ongoing low-priority notification, and provides a notification STOP action. MainActivity receives private in-app broadcasts for status and recognized speech while it is visible, but leaving the activity does not release the voice manager. The user can stop listening from the MARK button or the notification. Android may still reclaim services under severe system pressure, and the persistent notification is intentionally required for microphone privacy.
 
 ### Voice file management
 
@@ -118,10 +118,10 @@ The Android source and README are in `main`. IDE metadata, build outputs, releas
 ### Not complete or not yet verified
 
 - **Phone-control end-to-end test:** Confirm voice commands actually result in app launches and supported Settings screens on the phone.
-- **Accessibility end-to-end test:** Enable JARVIS under Android Accessibility settings, then test screen inspection, tapping, typing, scrolling, and confirmation-gated actions in several apps.
-- **Multi-step task test:** Try “open WhatsApp, find John, type a message, and send it”; verify JARVIS inspects between steps, stops before Send, resumes only after confirmation, and cancels on “stop”.
-- **Background listening test:** Start voice mode, accept notification permission, open another app, speak a command, verify JARVIS responds, then stop from the notification and verify microphone capture ends.
-- **File-management test:** Say “choose a storage folder”, select a folder, create and edit a text file, list it, then request deletion and verify JARVIS speaks the exact name and waits for “yes” before deleting.
+- **Accessibility end-to-end test:** Enable MARK under Android Accessibility settings, then test screen inspection, tapping, typing, scrolling, and confirmation-gated actions in several apps.
+- **Multi-step task test:** Try “open WhatsApp, find John, type a message, and send it”; verify MARK inspects between steps, stops before Send, resumes only after confirmation, and cancels on “stop”.
+- **Background listening test:** Start voice mode, accept notification permission, open another app, speak a command, verify MARK responds, then stop from the notification and verify microphone capture ends.
+- **File-management test:** Say “choose a storage folder”, select a folder, create and edit a text file, list it, then request deletion and verify MARK speaks the exact name and waits for “yes” before deleting.
 - **Barge-in latency test:** Confirm interruption stops speech promptly on the device. Current local code reacts to the server's interruption event; local voice activity detection could stop playback even earlier.
 - **Build verification in a full Android environment:** The cloud sandbox did not have a usable Java compiler/Android SDK, so an Android APK build could not be completed there. Use Code on the Go on the phone to build.
 - **Visible live transcript/history:** `MainActivity` has a callback prepared for recognized speech, but `LiveVoiceManager` does not yet deliver transcription events to it. Voice turns therefore are not fully shown as chat history.

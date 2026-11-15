@@ -14,6 +14,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Jarvis"
+rootProject.name = "MARK"
 
 include(":app")

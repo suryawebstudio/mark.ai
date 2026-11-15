@@ -1,6 +1,6 @@
 ---
 name: mark-computer-use
-description: Reliable computer-use guidance for MARK/JARVIS. Use when planning or executing visible Android accessibility actions or desktop actions through agent-desktop.
+description: Reliable computer-use guidance for MARK. Use when planning or executing visible Android accessibility actions or desktop actions through agent-desktop.
 ---
 
 # MARK computer use

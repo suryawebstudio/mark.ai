@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#050505">
-<title>JARVIS — Interactive Core</title>
+<title>MARK — Interactive Core</title>
 <style>
 :root{--gold:#39aaff;--bg:#000000}
 *{box-sizing:border-box}
@@ -38,21 +38,21 @@ canvas{width:100%;height:100%;max-height:510px;display:block;touch-action:none}
 </head>
 <body>
 <div class="app">
-<header><div class="brand">JARVIS<span>.</span></div><nav class="nav">
+<header><div class="brand">MARK<span>.</span></div><nav class="nav">
 <button onclick="openPanel('settings')">⚙ Settings</button><button onclick="openPanel('history')">History</button><button onclick="openPanel('chat')">Chat</button>
 </nav></header>
 <div class="status"><i></i><span id="status">SYSTEM ONLINE</span></div>
 <div class="visual" id="visual"><canvas id="sphere"></canvas></div>
 <div class="hint" id="hint">TOUCH THE CORE TO INTERACT</div>
 <div class="bottom"><button class="mic" id="mic" onclick="toggleVoice()">⌁</button><p id="micLabel">TAP TO SPEAK</p></div>
-<div class="composer"><input id="message" placeholder="Ask JARVIS anything..." onkeydown="if(event.key==='Enter')sendMessage()"><button onclick="sendMessage()">↑</button></div>
+<div class="composer"><input id="message" placeholder="Ask MARK anything..." onkeydown="if(event.key==='Enter')sendMessage()"><button onclick="sendMessage()">↑</button></div>
 
 <section class="panel" id="settings"><div class="panelhead"><h2>SETTINGS</h2><button class="close" onclick="closePanels()">×</button></div>
 <div class="setting">Voice responses <input type="checkbox" checked></div><div class="setting">Sound effects <input type="checkbox" checked></div>
 <div class="setting">Particle effects <input type="checkbox" checked></div><div class="setting">Auto listening <input type="checkbox"></div>
 <div class="setting">AI provider <span>Gemini ▾</span></div><div class="setting">Voice <span>English ▾</span></div></section>
 <section class="panel" id="history"><div class="panelhead"><h2>HISTORY</h2><button class="close" onclick="closePanels()">×</button></div><div id="historyList" class="messages"><p style="color:#777;text-align:center;margin-top:40px">Your conversations will appear here.</p></div></section>
-<section class="panel" id="chat"><div class="panelhead"><h2>JARVIS CHAT</h2><button class="close" onclick="closePanels()">×</button></div><div class="messages" id="messages"><div class="msg bot">Hello. I am JARVIS. Touch my core or send me a message.</div></div><div class="composer"><input id="chatInput" placeholder="Message JARVIS..." onkeydown="if(event.key==='Enter')sendChat()"><button onclick="sendChat()">↑</button></div></section>
+<section class="panel" id="chat"><div class="panelhead"><h2>MARK CHAT</h2><button class="close" onclick="closePanels()">×</button></div><div class="messages" id="messages"><div class="msg bot">Hello. I am MARK. Touch my core or send me a message.</div></div><div class="composer"><input id="chatInput" placeholder="Message MARK..." onkeydown="if(event.key==='Enter')sendChat()"><button onclick="sendChat()">↑</button></div></section>
 </div>
 <script>
 const canvas=document.getElementById('sphere'),ctx=canvas.getContext('2d'),visual=document.getElementById('visual');
@@ -122,13 +122,13 @@ function endPointer(e){if(!dragging)return;clearTimeout(holdTimer);const duratio
 visual.addEventListener('pointerup',endPointer);visual.addEventListener('pointercancel',endPointer);
 window.addEventListener('resize',resize);resize();animate();
 
-function setMode(m){mode=m;document.getElementById('status').textContent=m==='speaking'?'JARVIS SPEAKING':m==='listening'?'LISTENING':m==='thinking'?'PROCESSING':'SYSTEM ONLINE';document.getElementById('hint').innerHTML=m==='speaking'?'<strong>JARVIS IS SPEAKING</strong>':m==='listening'?'<strong>LISTENING TO YOU</strong>':m==='thinking'?'<strong>PROCESSING REQUEST</strong>':'TOUCH THE CORE TO INTERACT';document.getElementById('mic').classList.toggle('active',m==='listening')}
+function setMode(m){mode=m;document.getElementById('status').textContent=m==='speaking'?'MARK SPEAKING':m==='listening'?'LISTENING':m==='thinking'?'PROCESSING':'SYSTEM ONLINE';document.getElementById('hint').innerHTML=m==='speaking'?'<strong>MARK IS SPEAKING</strong>':m==='listening'?'<strong>LISTENING TO YOU</strong>':m==='thinking'?'<strong>PROCESSING REQUEST</strong>':'TOUCH THE CORE TO INTERACT';document.getElementById('mic').classList.toggle('active',m==='listening')}
 let recognition=null;
 function toggleVoice(){if(window.AndroidJarvis?.startVoice){AndroidJarvis.startVoice();return}if(mode==='listening'){recognition?.stop();setMode('idle');return}const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Speech){alert('Speech recognition unavailable. Try Chrome or connect the Android voice bridge.');return}recognition=new Speech();recognition.lang='en-IN';recognition.onstart=()=>setMode('listening');recognition.onresult=e=>{document.getElementById('message').value=e.results[0][0].transcript;sendMessage()};recognition.onend=()=>{if(mode==='listening')setMode('idle')};recognition.onerror=()=>setMode('idle');recognition.start()}
 function openPanel(id){document.getElementById(id).classList.add('show')}function closePanels(){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('show'))}
 function sendMessage(){const i=document.getElementById('message'),v=i.value.trim();if(!v)return;i.value='';addChat(v);openPanel('chat')}
 function sendChat(){const i=document.getElementById('chatInput'),v=i.value.trim();if(!v)return;i.value='';addChat(v)}
-function addChat(v){const m=document.getElementById('messages'),u=document.createElement('div');u.className='msg user';u.textContent=v;m.appendChild(u);m.scrollTop=m.scrollHeight;const h=document.getElementById('historyList');if(h.querySelector('p'))h.innerHTML='';const item=document.createElement('div');item.className='historyitem';item.textContent=v;h.prepend(item);if(window.AndroidJarvis?.sendMessage){setMode('thinking');AndroidJarvis.sendMessage(v)}else{const b=document.createElement('div');b.className='msg bot';b.textContent='Interface demo: connect your JARVIS AI backend to process this request.';m.appendChild(b);m.scrollTop=m.scrollHeight}}
+function addChat(v){const m=document.getElementById('messages'),u=document.createElement('div');u.className='msg user';u.textContent=v;m.appendChild(u);m.scrollTop=m.scrollHeight;const h=document.getElementById('historyList');if(h.querySelector('p'))h.innerHTML='';const item=document.createElement('div');item.className='historyitem';item.textContent=v;h.prepend(item);if(window.AndroidJarvis?.sendMessage){setMode('thinking');AndroidJarvis.sendMessage(v)}else{const b=document.createElement('div');b.className='msg bot';b.textContent='Interface demo: connect your MARK AI backend to process this request.';m.appendChild(b);m.scrollTop=m.scrollHeight}}
 function jarvisSpeak(text){const m=document.getElementById('messages'),b=document.createElement('div');b.className='msg bot';b.textContent=text;m.appendChild(b);m.scrollTop=m.scrollHeight;setMode('speaking')}
 </script>
 </body>
