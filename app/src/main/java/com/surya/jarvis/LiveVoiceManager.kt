@@ -62,9 +62,11 @@ class LiveVoiceManager(
         private const val MODEL =
             "models/gemini-3.1-flash-live-preview"
 
-        private const val INPUT_RATE = 16000
-        private const val OUTPUT_RATE = 24000
-        private const val MAX_TASK_STEPS = 24
+    private const val INPUT_RATE = 16000
+    private const val OUTPUT_RATE = 24000
+    private const val MAX_TASK_STEPS = 24
+    private const val BARGE_IN_MIN_RMS = 1_600.0
+    private const val BARGE_IN_REQUIRED_FRAMES = 3
     }
 
     private val client = OkHttpClient.Builder()
@@ -106,6 +108,8 @@ class LiveVoiceManager(
     private var suppressMicrophone = false
     @Volatile
     private var lastPlaybackChunkAtNanos = 0L
+    private var bargeInSpeechFrames = 0
+    private var ambientRms = 500.0
 
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
@@ -976,8 +980,15 @@ class LiveVoiceManager(
 
                         if (playbackStillSettling) {
                             // Keep reading so AudioRecord does not accumulate
-                            // stale speaker audio, but never send it upstream.
-                            continue
+                            // stale speaker audio. Android's VOICE_COMMUNICATION
+                            // source applies AEC/NS; sustained residual speech
+                            // is treated as a user barge-in, while short echo
+                            // fragments are discarded locally.
+                            if (detectBargeIn(buffer, count)) {
+                                interruptPlayback()
+                            } else {
+                                continue
+                            }
                         }
 
                         suppressMicrophone = false
@@ -1030,6 +1041,36 @@ class LiveVoiceManager(
         } catch (e: Exception) {
             fail("MICROPHONE ERROR: ${e.message}")
         }
+    }
+
+    private fun detectBargeIn(buffer: ByteArray, count: Int): Boolean {
+        var sumSquares = 0.0
+        var samples = 0
+        var index = 0
+
+        while (index + 1 < count) {
+            val sample = ((buffer[index + 1].toInt() shl 8) or
+                (buffer[index].toInt() and 0xff)).toShort().toDouble()
+            sumSquares += sample * sample
+            samples++
+            index += 2
+        }
+
+        if (samples == 0) return false
+
+        val rms = kotlin.math.sqrt(sumSquares / samples)
+        if (!suppressMicrophone) {
+            ambientRms = ambientRms * 0.95 + rms * 0.05
+        }
+
+        val speechThreshold = maxOf(BARGE_IN_MIN_RMS, ambientRms * 3.0)
+        if (rms >= speechThreshold) {
+            bargeInSpeechFrames++
+        } else {
+            bargeInSpeechFrames = 0
+        }
+
+        return bargeInSpeechFrames >= BARGE_IN_REQUIRED_FRAMES
     }
 
     private fun startPlayback() {
@@ -1134,6 +1175,7 @@ class LiveVoiceManager(
         playbackGeneration.incrementAndGet()
         playbackQueue.clear()
         suppressMicrophone = false
+        bargeInSpeechFrames = 0
 
         try {
             audioTrack?.let { track ->
@@ -1177,6 +1219,7 @@ class LiveVoiceManager(
         setupComplete = false
         clearTaskState()
         suppressMicrophone = false
+        bargeInSpeechFrames = 0
 
         try {
             recorderThread?.interrupt()
