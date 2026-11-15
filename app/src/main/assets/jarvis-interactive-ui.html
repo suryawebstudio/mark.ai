@@ -4,146 +4,132 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#050505">
-<title>MARK — Interactive Core</title>
+<title>JARVIS — Interactive Core</title>
 <style>
-:root{--gold:#ffc342;--bg:#050505}
+:root{--gold:#39aaff;--bg:#000000}
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:#eee;font-family:Inter,system-ui,sans-serif;touch-action:pan-y}
-.app{height:100dvh;max-width:680px;margin:auto;padding:18px 19px 16px;display:flex;flex-direction:column;position:relative;background:radial-gradient(ellipse at 50% 47%,#201707 0%,#0c0a06 35%,#050505 75%)}
+.app{height:100dvh;max-width:680px;margin:auto;padding:18px 19px 16px;display:flex;flex-direction:column;position:relative;background:#000000}
 header{display:flex;align-items:center;justify-content:space-between;z-index:2}
 .brand{font-size:19px;font-weight:800;letter-spacing:5px}.brand span{color:var(--gold)}
-.nav{display:flex;gap:7px}.nav button{border:1px solid #302819;background:#15130f;color:#c9b98f;border-radius:30px;padding:10px 13px;font-size:12px}
-.status{text-align:center;margin-top:28px;color:#b68b36;font-size:10px;letter-spacing:4px}
+.nav{display:flex;gap:7px}.nav button{border:1px solid #1d3448;background:#0b1622;color:#a9c7df;border-radius:30px;padding:10px 13px;font-size:12px}
+.status{text-align:center;margin-top:28px;color:#4b9bd5;font-size:10px;letter-spacing:4px}
 .status i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gold);box-shadow:0 0 12px var(--gold);margin-right:8px}
 .visual{flex:1;min-height:250px;display:flex;align-items:center;justify-content:center;position:relative;touch-action:none}
 canvas{width:100%;height:100%;max-height:510px;display:block;touch-action:none}
 .hint{text-align:center;color:#8b806b;font-size:12px;letter-spacing:2px;margin-top:-5px}
 .hint strong{color:var(--gold);font-weight:500}
 .bottom{text-align:center;padding:19px 0 13px}
-.mic{width:64px;height:64px;border-radius:50%;border:1px solid #a57c20;background:#211a0b;color:var(--gold);font-size:26px;box-shadow:0 0 25px #d99b1c25;transition:.25s}
-.mic.active{background:#60430b;box-shadow:0 0 38px #ffba28aa;transform:scale(1.08)}
+.mic{width:64px;height:64px;border-radius:50%;border:1px solid #246da4;background:#0b2034;color:var(--gold);font-size:26px;box-shadow:0 0 25px #d99b1c25;transition:.25s}
+.mic.active{background:#103b60;box-shadow:0 0 38px #168fff88;transform:scale(1.08)}
 .bottom p{font-size:10px;color:#777;margin-top:10px;letter-spacing:2px}
-.composer{display:flex;gap:9px;align-items:center;border:1px solid #302b21;border-radius:30px;padding:7px 8px 7px 17px;background:#111}
+.composer{display:flex;gap:9px;align-items:center;border:1px solid #20394d;border-radius:30px;padding:7px 8px 7px 17px;background:#111}
 .composer input{background:none;border:0;outline:none;color:white;flex:1;min-width:0;font-size:14px}
-.composer button{border:0;background:#dca927;color:#130e03;width:38px;height:38px;border-radius:50%;font-size:18px}
-.panel{position:absolute;inset:0;background:#080808f5;z-index:5;padding:24px;display:none;flex-direction:column;overflow-y:auto;overflow-x:hidden;touch-action:pan-y;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;will-change:scroll-position}
-.panel.show{display:flex}.panelhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;flex:0 0 auto}
+.composer button{border:0;background:#36a8f5;color:#130e03;width:38px;height:38px;border-radius:50%;font-size:18px}
+.panel{position:absolute;inset:0;background:#080808f5;z-index:5;padding:24px;display:none;flex-direction:column}
+.panel.show{display:flex}.panelhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
 .panel h2{font-size:19px;letter-spacing:2px}.close{border:1px solid #333;border-radius:50%;width:38px;height:38px;color:white;background:#171717;font-size:20px}
 .messages{flex:1;overflow:auto;display:flex;flex-direction:column;gap:12px}
 .msg{max-width:86%;padding:13px 16px;border-radius:17px;font-size:14px;line-height:1.5}
-.bot{background:#1b180f;border:1px solid #3c3018;align-self:flex-start}.user{background:#35290e;align-self:flex-end}
-.setting{padding:16px 0;border-bottom:1px solid #252525;display:flex;justify-content:space-between;color:#bbb;font-size:14px}.settingAction{margin-top:14px;padding:13px;border:1px solid #70521a;border-radius:12px;background:#211a0b;color:#f4cb70;font-size:13px}
-.setting input{accent-color:#eab42d}.historyitem{padding:14px;background:#151515;border:1px solid #292929;border-radius:14px;margin-bottom:9px;color:#ccc;font-size:14px}.fileitem{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px;background:#151515;border:1px solid #292929;border-radius:14px;margin-bottom:9px;color:#ccc;font-size:14px}.fileitem span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fileitem button{border:1px solid #70521a;border-radius:10px;background:#211a0b;color:#f4cb70;padding:8px 11px;font-size:12px;white-space:nowrap}
-.toast{position:absolute;left:50%;bottom:115px;transform:translateX(-50%);padding:9px 14px;background:#211a0b;border:1px solid #70521a;border-radius:20px;color:#f4cb70;font-size:11px;white-space:nowrap;opacity:0;transition:opacity .2s;pointer-events:none}
-.toast.show{opacity:1}
+.bot{background:#0c1c2b;border:1px solid #1c4564;align-self:flex-start}.user{background:#103653;align-self:flex-end}
+.setting{padding:16px 0;border-bottom:1px solid #252525;display:flex;justify-content:space-between;color:#bbb;font-size:14px}
+.setting input{accent-color:#36a8f5}.historyitem{padding:14px;background:#0b1722;border:1px solid #203447;border-radius:14px;margin-bottom:9px;color:#ccc;font-size:14px}
 </style>
 </head>
 <body>
 <div class="app">
-<header><div class="brand">MARK<span>.</span></div><nav class="nav">
-<button onclick="openPanel('settings')">⚙ Settings</button><button onclick="openPanel('files')">Files</button><button onclick="openPanel('chat')">Chat</button>
+<header><div class="brand">JARVIS<span>.</span></div><nav class="nav">
+<button onclick="openPanel('settings')">⚙ Settings</button><button onclick="openPanel('history')">History</button><button onclick="openPanel('chat')">Chat</button>
 </nav></header>
 <div class="status"><i></i><span id="status">SYSTEM ONLINE</span></div>
 <div class="visual" id="visual"><canvas id="sphere"></canvas></div>
 <div class="hint" id="hint">TOUCH THE CORE TO INTERACT</div>
 <div class="bottom"><button class="mic" id="mic" onclick="toggleVoice()">⌁</button><p id="micLabel">TAP TO SPEAK</p></div>
-<div class="composer"><input id="message" placeholder="Ask MARK anything..." onkeydown="if(event.key==='Enter')sendMessage()"><button onclick="sendMessage()">↑</button></div>
-<div class="toast" id="toast">CORE INTERACTION</div>
+<div class="composer"><input id="message" placeholder="Ask JARVIS anything..." onkeydown="if(event.key==='Enter')sendMessage()"><button onclick="sendMessage()">↑</button></div>
 
 <section class="panel" id="settings"><div class="panelhead"><h2>SETTINGS</h2><button class="close" onclick="closePanels()">×</button></div>
- <div class="setting">Voice responses <input id="voiceResponses" type="checkbox" checked onchange="setVoiceResponses(this.checked)"></div><div class="setting">Sound effects <input id="soundEffects" type="checkbox" checked onchange="setSoundEffects(this.checked)"></div>
- <div class="setting">Offline command processing <span style="color:#9fca63">READY</span></div>
- <div class="setting">Wake word: “Mark” <input id="wakeWord" type="checkbox" onchange="setWakeWord(this.checked)"></div>
- <div style="color:#777;font-size:12px;line-height:1.45;padding:0 0 12px">Keeps a visible microphone notification while the app UI is closed. Screen-on wake is supported; Android may suspend microphone services on locked screens or under battery restrictions.</div>
- <div class="setting">Shake to wake MARK <input id="gestureWake" type="checkbox" onchange="setGestureWake(this.checked)"></div>
- <div style="color:#777;font-size:12px;line-height:1.45;padding:0 0 12px">Shake wake uses a visible Android foreground notification and a motion sensor. It can work while the screen is locked, but not after Android force-stops MARK or a device battery policy suspends sensors.</div>
-<div class="setting">Particle effects <input id="particleEffects" type="checkbox" checked onchange="setParticleEffects(this.checked)"></div><div class="setting">Auto listening <input id="autoListening" type="checkbox" onchange="setAutoListening(this.checked)"></div>
-<div class="setting">AI provider <span>Gemini ▾</span></div><div class="setting">Voice <span>English ▾</span></div>
- <button id="defaultAssistantAction" class="settingAction" onclick="requestDefaultAssistant()">Set as default assistant</button><button id="fullStorageAction" class="settingAction" onclick="toggleFullStorage()">Full storage access: OFF</button><button class="settingAction" onclick="openAccessibility()">Accessibility controls</button>
- <div class="setting" style="display:block"><strong style="color:#f4cb70">Assistant permissions</strong><div style="color:#777;font-size:12px;line-height:1.45;margin-top:7px">Each capability opens Android's approved permission dialog or Settings page. MARK cannot grant these permissions silently. Location is not requested.</div></div>
- <button class="settingAction permissionAction" data-permission="contacts" onclick="requestAssistantPermission('contacts')">Contacts: <span>CHECKING</span></button>
- <button class="settingAction permissionAction" data-permission="calls" onclick="requestAssistantPermission('calls')">Phone calls: <span>CHECKING</span></button>
- <button class="settingAction permissionAction" data-permission="sms" onclick="requestAssistantPermission('sms')">SMS: <span>CHECKING</span></button>
- <button class="settingAction permissionAction" data-permission="calendar" onclick="requestAssistantPermission('calendar')">Calendar: <span>CHECKING</span></button>
- <button class="settingAction permissionAction" data-permission="bluetooth" onclick="requestAssistantPermission('bluetooth')">Nearby Bluetooth devices: <span>CHECKING</span></button>
- <button class="settingAction permissionAction" data-permission="notifications" onclick="requestAssistantPermission('notifications')">Notification reading: <span>CHECKING</span></button>
- <button class="settingAction permissionAction" data-permission="callLog" onclick="requestAssistantPermission('callLog')">Call log access: <span>CHECKING</span></button>
- <button class="settingAction permissionAction" data-permission="media" onclick="requestAssistantPermission('media')">Media and photos: <span>CHECKING</span></button>
- <button class="settingAction permissionAction" data-permission="alarms" onclick="requestAssistantPermission('alarms')">Alarms and reminders: <span>CHECKING</span></button>
- <button id="memoryAction" class="settingAction" onclick="showMemories()">Memories: 0 saved</button><button class="settingAction" onclick="clearMemories()">Forget all memories</button></section>
+<div class="setting">Voice responses <input type="checkbox" checked></div><div class="setting">Sound effects <input type="checkbox" checked></div>
+<div class="setting">Particle effects <input type="checkbox" checked></div><div class="setting">Auto listening <input type="checkbox"></div>
+<div class="setting">AI provider <span>Gemini ▾</span></div><div class="setting">Voice <span>English ▾</span></div></section>
 <section class="panel" id="history"><div class="panelhead"><h2>HISTORY</h2><button class="close" onclick="closePanels()">×</button></div><div id="historyList" class="messages"><p style="color:#777;text-align:center;margin-top:40px">Your conversations will appear here.</p></div></section>
-<section class="panel" id="files"><div class="panelhead"><h2>MARK FILES</h2><button class="close" onclick="closePanels()">×</button></div><button class="settingAction" onclick="refreshFiles()">Refresh files</button><div id="filesList" class="messages"><p style="color:#777;text-align:center;margin-top:40px">Files created by MARK will appear here.</p></div></section>
-<section class="panel" id="chat"><div class="panelhead"><h2>MARK CHAT</h2><button class="close" onclick="closePanels()">×</button></div><div class="messages" id="messages"><div class="msg bot">Hello. I am MARK. Touch my core or send me a message.</div></div><div class="composer"><input id="chatInput" placeholder="Message MARK..." onkeydown="if(event.key==='Enter')sendChat()"><button onclick="sendChat()">↑</button></div></section>
+<section class="panel" id="chat"><div class="panelhead"><h2>JARVIS CHAT</h2><button class="close" onclick="closePanels()">×</button></div><div class="messages" id="messages"><div class="msg bot">Hello. I am JARVIS. Touch my core or send me a message.</div></div><div class="composer"><input id="chatInput" placeholder="Message JARVIS..." onkeydown="if(event.key==='Enter')sendChat()"><button onclick="sendChat()">↑</button></div></section>
 </div>
 <script>
 const canvas=document.getElementById('sphere'),ctx=canvas.getContext('2d'),visual=document.getElementById('visual');
-    let W=0,H=0,dpr=1,particles=[],rotationY=0,rotationX=0,mode='idle',effectsEnabled=true,soundEnabled=true,pointer=null,dragging=false,lastX=0,lastY=0,holdTimer=null,held=false,pressTime=0,toastTimer=null,panelOpen=false;
+let W=0,H=0,dpr=1,particles=[],rotationY=0,rotationX=0,mode='idle',pointer=null,dragging=false,lastX=0,lastY=0,holdTimer=null,held=false,pressTime=0,tapPulseTime=0;
 const TAU=Math.PI*2;
 function resize(){const r=canvas.getBoundingClientRect();dpr=Math.min(devicePixelRatio||1,2);W=r.width;H=r.height;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);makeParticles()}
-function makeParticles(){particles=[];const n=950;for(let i=0;i<n;i++){const y=1-2*(i+.5)/n,a=Math.PI*(3-Math.sqrt(5))*i,rr=Math.sqrt(1-y*y);particles.push({x:Math.cos(a)*rr,y,z:Math.sin(a)*rr,size:.55+Math.random()*1.35,phase:Math.random()*TAU})}}
-    function beep(){if(!soundEnabled)return;try{const a=new AudioContext(),o=a.createOscillator(),g=a.createGain();o.frequency.value=620;g.gain.value=.035;o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+.045)}catch(e){}}
-    function showToast(s){const t=document.getElementById('toast');t.textContent=s;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),950)}
-	function animate(){
-	     requestAnimationFrame(animate);if(panelOpen||!effectsEnabled){ctx.clearRect(0,0,W,H);return}const now=performance.now();
+function makeParticles(){
+ particles=[];
+ // Fewer points create clearly visible spacing between the glowing blue surface dots.
+ const n=390;
+ for(let i=0;i<n;i++){
+  const y=1-2*(i+.5)/n;
+  const a=Math.PI*(3-Math.sqrt(5))*i;
+  const rr=Math.sqrt(1-y*y);
+  particles.push({
+   x:Math.cos(a)*rr,
+   y,
+   z:Math.sin(a)*rr,
+   size:.72+Math.random()*.62,
+   phase:Math.random()*TAU
+  });
+ }
+}
+function animate(){
+ requestAnimationFrame(animate);
+ ctx.clearRect(0,0,W,H);
+ const now=performance.now();
+ // No orbiting emitters or free-floating particles: every dot belongs to the sphere surface.
  const speaking=mode==='speaking',listening=mode==='listening';
- if(!dragging)rotationY+=speaking?.009:listening?.006:.0022;
- const pulse=speaking?1.13+Math.sin(now*.006)*.12:listening?1.055+Math.sin(now*.004)*.035:1+Math.sin(now*.0013)*.018;
- const holdScale=held?1.22:1, R=Math.min(W,H)*.31*pulse*holdScale,cx=W/2,cy=H/2;
- // soft ambient halo
- const halo=ctx.createRadialGradient(cx,cy,R*.2,cx,cy,R*1.4);halo.addColorStop(0,'rgba(255,177,35,.10)');halo.addColorStop(1,'rgba(255,177,35,0)');
- ctx.fillStyle=halo;ctx.beginPath();ctx.arc(cx,cy,R*1.45,0,TAU);ctx.fill();
+ const pulse=speaking?1.09+Math.sin(now*.006)*.075:
+             listening?1.035+Math.sin(now*.004)*.018:
+             1+Math.sin(now*.0013)*.012;
+ const holdScale=held?1.14:1;
+ const tapAge=(now-tapPulseTime)/650;
+ const tapScale=tapPulseTime?1+Math.max(0,1-tapAge)*.09*Math.sin(Math.max(0,1-tapAge)*Math.PI):1;
+ const R=Math.min(W,H)*.32*pulse*holdScale*tapScale;
+ const cx=W/2,cy=H/2;
+
+ // Removed the inner blue atmospheric glow; only the blue surface dots remain.
+
  const pts=particles.map(p=>{
-  let x=p.x*Math.cos(rotationY)-p.z*Math.sin(rotationY),z=p.x*Math.sin(rotationY)+p.z*Math.cos(rotationY);
-  const yy=p.y*Math.cos(rotationX)-z*Math.sin(rotationX),zz=p.y*Math.sin(rotationX)+z*Math.cos(rotationX);
-  let ripple=0;
-  if(pointer){const dx=(cx+x*R)-pointer.x,dy=(cy+yy*R)-pointer.y,dist=Math.hypot(dx,dy);ripple=Math.exp(-dist/75)*Math.sin(dist*.09-now*.012)*.055}
-  const breathe=speaking?Math.sin(now*.009+p.phase)*.025:0;
-  const scale=R*(1+ripple+breathe);
-  return{x:cx+x*scale,y:cy+yy*scale,z:zz,size:p.size,phase:p.phase};
+  const x=p.x*Math.cos(rotationY)-p.z*Math.sin(rotationY);
+  const z=p.x*Math.sin(rotationY)+p.z*Math.cos(rotationY);
+  const yy=p.y*Math.cos(rotationX)-z*Math.sin(rotationX);
+  const zz=p.y*Math.sin(rotationX)+z*Math.cos(rotationX);
+  const breathe=speaking?Math.sin(now*.008+p.phase)*.012:0;
+  const scale=R*(1+breathe);
+  return{x:cx+x*scale,y:cy+yy*scale,z:zz,size:p.size};
  }).sort((a,b)=>a.z-b.z);
- for(const p of pts){const depth=(p.z+1)/2,alpha=.22+depth*.75,sz=p.size*(.65+depth*.55)*(held?1.15:1);
-  ctx.beginPath();ctx.arc(p.x,p.y,sz,0,TAU);ctx.fillStyle=`rgba(255,${Math.floor(164+depth*65)},${Math.floor(35+depth*20)},${alpha})`;
-  ctx.shadowBlur=depth>.45?5+depth*9:1;ctx.shadowColor='#ffb51c';ctx.fill()
+
+ for(const p of pts){
+  const depth=(p.z+1)/2;
+  const alpha=.38+depth*.58;
+  const radius=p.size*(.72+depth*.42)*(held?1.08:1);
+  ctx.beginPath();
+  ctx.arc(p.x,p.y,radius,0,TAU);
+  ctx.fillStyle=`rgba(65,175,255,${alpha})`;
+  ctx.shadowBlur=depth>.25?7+depth*11:3;
+  ctx.shadowColor='#168fff';
+  ctx.fill();
  }
  ctx.shadowBlur=0;
- // touch ripple rings
- if(pointer){const age=now-pointer.time,rad=(age%850)/850*95;ctx.beginPath();ctx.arc(pointer.x,pointer.y,rad,0,TAU);ctx.strokeStyle=`rgba(255,190,65,${Math.max(0,1-age/850)*.5})`;ctx.lineWidth=1.2;ctx.stroke()}
 }
-visual.addEventListener('pointerdown',e=>{e.preventDefault();visual.setPointerCapture(e.pointerId);dragging=true;lastX=e.clientX;lastY=e.clientY;pressTime=performance.now();held=false;holdTimer=setTimeout(()=>{if(dragging){held=true;showToast('CORE EXPANDED')}} ,450);pointer={x:e.clientX-visual.getBoundingClientRect().left,y:e.clientY-visual.getBoundingClientRect().top,time:performance.now()}});
+visual.addEventListener('pointerdown',e=>{e.preventDefault();visual.setPointerCapture(e.pointerId);dragging=true;lastX=e.clientX;lastY=e.clientY;pressTime=performance.now();held=false;holdTimer=setTimeout(()=>{if(dragging){held=true;}} ,450);pointer=null});
 visual.addEventListener('pointermove',e=>{if(!dragging)return;const dx=e.clientX-lastX,dy=e.clientY-lastY;if(Math.abs(dx)+Math.abs(dy)>2){clearTimeout(holdTimer);if(Math.abs(dx)+Math.abs(dy)>5)pointer=null;rotationY+=dx*.009;rotationX=Math.max(-1.2,Math.min(1.2,rotationX+dy*.009));lastX=e.clientX;lastY=e.clientY}});
-    function endPointer(e){if(!dragging)return;clearTimeout(holdTimer);const duration=performance.now()-pressTime;dragging=false;if(held){held=false;showToast('CORE RELEASED')}else if(duration<350&&pointer){beep();showToast('CORE PULSE');pointer.time=performance.now()}setTimeout(()=>{pointer=null},850)}
+function endPointer(e){if(!dragging)return;clearTimeout(holdTimer);const duration=performance.now()-pressTime;dragging=false;if(held){held=false;}else if(duration<350){tapPulseTime=performance.now();}}
 visual.addEventListener('pointerup',endPointer);visual.addEventListener('pointercancel',endPointer);
 window.addEventListener('resize',resize);resize();animate();
 
-function setMode(m){mode=m;document.getElementById('status').textContent=m==='speaking'?'MARK SPEAKING':m==='listening'?'LISTENING':m==='thinking'?'PROCESSING':'SYSTEM ONLINE';document.getElementById('hint').innerHTML=m==='speaking'?'<strong>MARK IS SPEAKING</strong>':m==='listening'?'<strong>LISTENING TO YOU</strong>':m==='thinking'?'<strong>PROCESSING REQUEST</strong>':'TOUCH THE CORE TO INTERACT';document.getElementById('mic').classList.toggle('active',m==='listening')}
+function setMode(m){mode=m;document.getElementById('status').textContent=m==='speaking'?'JARVIS SPEAKING':m==='listening'?'LISTENING':m==='thinking'?'PROCESSING':'SYSTEM ONLINE';document.getElementById('hint').innerHTML=m==='speaking'?'<strong>JARVIS IS SPEAKING</strong>':m==='listening'?'<strong>LISTENING TO YOU</strong>':m==='thinking'?'<strong>PROCESSING REQUEST</strong>':'TOUCH THE CORE TO INTERACT';document.getElementById('mic').classList.toggle('active',m==='listening')}
 let recognition=null;
 function toggleVoice(){if(window.AndroidJarvis?.startVoice){AndroidJarvis.startVoice();return}if(mode==='listening'){recognition?.stop();setMode('idle');return}const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Speech){alert('Speech recognition unavailable. Try Chrome or connect the Android voice bridge.');return}recognition=new Speech();recognition.lang='en-IN';recognition.onstart=()=>setMode('listening');recognition.onresult=e=>{document.getElementById('message').value=e.results[0][0].transcript;sendMessage()};recognition.onend=()=>{if(mode==='listening')setMode('idle')};recognition.onerror=()=>setMode('idle');recognition.start()}
-    function openPanel(id){panelOpen=true;document.getElementById(id).classList.add('show');if(id==='files')refreshFiles()}function closePanels(){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('show'));panelOpen=false}
+function openPanel(id){document.getElementById(id).classList.add('show')}function closePanels(){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('show'))}
 function sendMessage(){const i=document.getElementById('message'),v=i.value.trim();if(!v)return;i.value='';addChat(v);openPanel('chat')}
 function sendChat(){const i=document.getElementById('chatInput'),v=i.value.trim();if(!v)return;i.value='';addChat(v)}
-function addUserMessage(v){const m=document.getElementById('messages'),u=document.createElement('div');u.className='msg user';u.textContent=v;m.appendChild(u);m.scrollTop=m.scrollHeight;const h=document.getElementById('historyList');if(h.querySelector('p'))h.innerHTML='';const item=document.createElement('div');item.className='historyitem';item.textContent=v;h.prepend(item)}
-function addChat(v){addUserMessage(v);if(window.AndroidJarvis?.sendMessage){setMode('thinking');AndroidJarvis.sendMessage(v)}else{const b=document.createElement('div');b.className='msg bot';b.textContent='Interface demo: connect your MARK AI backend to process this request.';document.getElementById('messages').appendChild(b)}}
-function addChatFromAndroid(v){addUserMessage(v);openPanel('chat')}
-function setParticleEffects(enabled){effectsEnabled=enabled;canvas.style.opacity=enabled?'1':'0';if(window.AndroidJarvis?.setParticleEffects)AndroidJarvis.setParticleEffects(enabled)}
-function setVoiceResponses(enabled){if(window.AndroidJarvis?.setVoiceResponses)AndroidJarvis.setVoiceResponses(enabled);showToast(enabled?'VOICE RESPONSES ON':'VOICE RESPONSES OFF')}
-    function setSoundEffects(enabled){soundEnabled=enabled;if(window.AndroidJarvis?.setSoundEffects)AndroidJarvis.setSoundEffects(enabled);if(enabled)beep();showToast(enabled?'SOUND EFFECTS ON':'SOUND EFFECTS OFF')}
-	function setAutoListening(enabled){if(window.AndroidJarvis?.setAutoListening)AndroidJarvis.setAutoListening(enabled);if(enabled&&!window.AndroidJarvis?.startVoice)showToast('AUTO LISTENING NEEDS ANDROID VOICE');else showToast(enabled?'AUTO LISTENING ON':'AUTO LISTENING OFF')}
-	function setGestureWake(enabled){if(window.AndroidJarvis?.setGestureWake)AndroidJarvis.setGestureWake(enabled);else showToast('ANDROID GESTURE WAKE UNAVAILABLE')}
-		function setWakeWord(enabled){if(window.AndroidJarvis?.setWakeWord)AndroidJarvis.setWakeWord(enabled);else showToast('ANDROID WAKE WORD UNAVAILABLE')}
-	function toggleFullStorage(){if(window.AndroidJarvis?.toggleFullStorage)AndroidJarvis.toggleFullStorage();else showToast('ANDROID STORAGE CONTROL UNAVAILABLE')}
-		function requestDefaultAssistant(){if(window.AndroidJarvis?.requestDefaultAssistant)AndroidJarvis.requestDefaultAssistant();else showToast('ANDROID ASSISTANT ROLE UNAVAILABLE')}
-		function requestAssistantPermission(key){if(window.AndroidJarvis?.requestAssistantPermission)AndroidJarvis.requestAssistantPermission(key);else showToast('ANDROID PERMISSION CONTROL UNAVAILABLE')}
-		function updateAssistantPermissionState(){if(!window.AndroidJarvis?.getAssistantPermissionState)return;try{const s=JSON.parse(AndroidJarvis.getAssistantPermissionState());document.querySelectorAll('.permissionAction').forEach(b=>{const key=b.dataset.permission,enabled=!!s[key],label=b.firstChild;if(label)label.textContent=label.textContent.replace(/: (CHECKING|ON|OFF)$/,'')+': '+(enabled?'ON':'OFF');b.style.borderColor=enabled?'#4d6f35':'#70521a'})}catch(e){}}
-		function openAccessibility(){if(window.AndroidJarvis?.openAccessibility)AndroidJarvis.openAccessibility();else showToast('ANDROID ACCESSIBILITY CONTROL UNAVAILABLE')}
-	function refreshFiles(){const list=document.getElementById('filesList');if(!window.AndroidJarvis?.getShareableFiles){list.innerHTML='<p style="color:#777;text-align:center;margin-top:40px">File sharing is unavailable.</p>';return}try{const state=JSON.parse(AndroidJarvis.getUiState());if(!state.fullStorage){list.innerHTML='<p style="color:#777;text-align:center;margin-top:40px">Enable Full storage access in Settings before using MARK files.</p>';return}const files=JSON.parse(AndroidJarvis.getShareableFiles());list.innerHTML='';if(!files.length){list.innerHTML='<p style="color:#777;text-align:center;margin-top:40px">No files are available. Ask MARK to create one first.</p>';return}files.forEach(file=>{const row=document.createElement('div');row.className='fileitem';const label=document.createElement('span');label.textContent=file.name;const button=document.createElement('button');button.textContent='Share';button.onclick=()=>AndroidJarvis.shareFile(file.name);row.appendChild(label);row.appendChild(button);list.appendChild(row)})}catch(e){list.innerHTML='<p style="color:#777;text-align:center;margin-top:40px">Could not load MARK files.</p>'}}
-		function setFullStorageLabel(enabled){const b=document.getElementById('fullStorageAction');if(b)b.textContent=enabled?'Full storage access: ON':'Full storage access: OFF'}
-		function updateDefaultAssistantLabel(){if(!window.AndroidJarvis?.getUiState)return;try{const s=JSON.parse(AndroidJarvis.getUiState()),b=document.getElementById('defaultAssistantAction');if(b)b.textContent=s.defaultAssistant?'Default assistant: MARK':'Set as default assistant'}catch(e){}}
-	function updateMemoryLabel(count){const b=document.getElementById('memoryAction');if(b)b.textContent='Memories: '+(count||0)+' saved'}
-	function showMemories(){if(!window.AndroidJarvis?.getMemories){showToast('MEMORY CONTROL UNAVAILABLE');return}const memories=AndroidJarvis.getMemories();jarvisSpeak(memories);openPanel('chat')}
-	function clearMemories(){if(!window.AndroidJarvis?.clearMemories){showToast('MEMORY CONTROL UNAVAILABLE');return}if(confirm('Forget all saved memories?'))AndroidJarvis.clearMemories()}
-	 function applyNativeSettings(){if(!window.AndroidJarvis?.getUiState)return;try{const s=JSON.parse(AndroidJarvis.getUiState());document.getElementById('voiceResponses').checked=!!s.voiceResponses;document.getElementById('soundEffects').checked=!!s.soundEffects;document.getElementById('particleEffects').checked=!!s.particleEffects;document.getElementById('autoListening').checked=!!s.autoListening;document.getElementById('wakeWord').checked=!!s.wakeWord;document.getElementById('gestureWake').checked=!!s.gestureWake;soundEnabled=!!s.soundEffects;effectsEnabled=!!s.particleEffects;canvas.style.opacity=effectsEnabled?'1':'0';setFullStorageLabel(!!s.fullStorage);updateDefaultAssistantLabel();updateMemoryLabel(s.memoryCount||0);updateAssistantPermissionState()}catch(e){}}
+function addChat(v){const m=document.getElementById('messages'),u=document.createElement('div');u.className='msg user';u.textContent=v;m.appendChild(u);m.scrollTop=m.scrollHeight;const h=document.getElementById('historyList');if(h.querySelector('p'))h.innerHTML='';const item=document.createElement('div');item.className='historyitem';item.textContent=v;h.prepend(item);if(window.AndroidJarvis?.sendMessage){setMode('thinking');AndroidJarvis.sendMessage(v)}else{const b=document.createElement('div');b.className='msg bot';b.textContent='Interface demo: connect your JARVIS AI backend to process this request.';m.appendChild(b);m.scrollTop=m.scrollHeight}}
 function jarvisSpeak(text){const m=document.getElementById('messages'),b=document.createElement('div');b.className='msg bot';b.textContent=text;m.appendChild(b);m.scrollTop=m.scrollHeight;setMode('speaking')}
-applyNativeSettings();
 </script>
 </body>
 </html>
