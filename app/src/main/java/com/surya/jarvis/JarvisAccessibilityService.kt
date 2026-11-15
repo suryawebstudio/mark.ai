@@ -20,9 +20,10 @@ import java.util.UUID
 class JarvisAccessibilityService : AccessibilityService() {
 
     private data class RefEntry(
-        val node: AccessibilityNodeInfo,
         val role: String,
-        val label: String
+        val label: String,
+        val description: String,
+        val nativeId: String?
     )
 
     companion object {
@@ -59,6 +60,7 @@ class JarvisAccessibilityService : AccessibilityService() {
     private var snapshotCounter = 0L
     private var currentSnapshotId: String? = null
     private val refs = LinkedHashMap<String, RefEntry>()
+    private var snapshotTruncated = false
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -117,7 +119,8 @@ class JarvisAccessibilityService : AccessibilityService() {
 
         val entry = refs[ref]
             ?: return false to "That ref is not valid for the current snapshot. Call inspect_visible_screen again."
-        val node = entry.node
+        val node = resolveRef(entry)
+            ?: return false to "That ref is stale or ambiguous on the current screen. Call inspect_visible_screen again and use a new ref."
         if (!node.isVisibleToUser && action != "scroll") {
             return false to "That ref is no longer visible. Call inspect_visible_screen again."
         }
@@ -175,6 +178,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         val snapshotId = "a${snapshotCounter.toString(36)}${UUID.randomUUID().toString().take(6)}"
         val nextRefs = LinkedHashMap<String, RefEntry>()
         val elements = JSONArray()
+        snapshotTruncated = false
         collectElements(root, elements, nextRefs, snapshotId, 0)
         refs.clear()
         refs.putAll(nextRefs)
@@ -186,6 +190,7 @@ class JarvisAccessibilityService : AccessibilityService() {
             .put("package", root.packageName?.toString().orEmpty().ifBlank { "unknown" })
             .put("class", root.className?.toString().orEmpty().ifBlank { "unknown" })
             .put("ref_count", refs.size)
+            .put("complete", !snapshotTruncated)
             .put("elements", elements)
             .toString()
     }
@@ -197,12 +202,16 @@ class JarvisAccessibilityService : AccessibilityService() {
         snapshotId: String,
         depth: Int
     ) {
-        if (depth > 20 || elements.length() >= 100) return
+        if (depth > 20 || elements.length() >= 100) {
+            snapshotTruncated = true
+            return
+        }
         val text = node.text?.toString()?.trim().orEmpty()
         val description = node.contentDescription?.toString()?.trim().orEmpty()
         val role = node.className?.toString()?.substringAfterLast('.') ?: "node"
         val actionable = node.isClickable || node.isEditable || node.isScrollable || node.actionList.isNotEmpty()
         val visible = node.isVisibleToUser || actionable
+        val nativeId = node.viewIdResourceName?.takeIf { it.isNotBlank() }
 
         if (visible && (text.isNotBlank() || description.isNotBlank() || actionable)) {
             val ref = if (actionable) "@$snapshotId:e${outputRefs.size + 1}" else ""
@@ -211,11 +220,19 @@ class JarvisAccessibilityService : AccessibilityService() {
                 .put("role", role)
                 .put("text", text)
                 .put("description", description)
+                .put("name", text.ifBlank { description })
                 .put("visible", node.isVisibleToUser)
                 .put("enabled", node.isEnabled)
                 .put("clickable", node.isClickable)
                 .put("editable", node.isEditable)
                 .put("scrollable", node.isScrollable)
+                .put("states", JSONArray().apply {
+                    if (node.isEnabled) put("enabled") else put("disabled")
+                    if (node.isFocused) put("focused")
+                    if (node.isChecked) put("checked")
+                    if (node.isSelected) put("selected")
+                })
+            if (nativeId != null) item.put("native_id", nativeId)
             if (ref.isNotBlank()) {
                 item.put("ref", ref)
                 item.put("actions", JSONArray().apply {
@@ -230,13 +247,45 @@ class JarvisAccessibilityService : AccessibilityService() {
                     .put("top", bounds.top)
                     .put("right", bounds.right)
                     .put("bottom", bounds.bottom))
-                outputRefs[ref] = RefEntry(node, role, label)
+                outputRefs[ref] = RefEntry(role, label, description, nativeId)
             }
             elements.put(item)
         }
         for (index in 0 until node.childCount) {
             node.getChild(index)?.let { collectElements(it, elements, outputRefs, snapshotId, depth + 1) }
         }
+    }
+
+    /**
+     * Re-identify a ref against the current accessibility tree instead of
+     * trusting the AccessibilityNodeInfo retained during the old snapshot.
+     * Stable identity is role + name/description + optional native view id.
+     * Ambiguous matches fail closed so MARK never guesses between controls.
+     */
+    private fun resolveRef(entry: RefEntry): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow ?: return null
+        val matches = mutableListOf<AccessibilityNodeInfo>()
+
+        fun walk(node: AccessibilityNodeInfo, depth: Int) {
+            if (depth > 20 || matches.size > 1) return
+            val text = node.text?.toString()?.trim().orEmpty()
+            val description = node.contentDescription?.toString()?.trim().orEmpty()
+            val role = node.className?.toString()?.substringAfterLast('.') ?: "node"
+            val actionable = node.isClickable || node.isEditable || node.isScrollable || node.actionList.isNotEmpty()
+            val visible = node.isVisibleToUser || actionable
+            val nativeId = node.viewIdResourceName?.takeIf { it.isNotBlank() }
+            val label = text.ifBlank { description }
+            val identityMatches = visible && actionable && role == entry.role &&
+                label == entry.label && description == entry.description &&
+                (entry.nativeId == null || nativeId == entry.nativeId)
+            if (identityMatches) matches += node
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let { walk(it, depth + 1) }
+            }
+        }
+
+        walk(root, 0)
+        return matches.singleOrNull()
     }
 
     private fun clickableAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
