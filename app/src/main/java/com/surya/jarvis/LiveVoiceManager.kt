@@ -99,6 +99,13 @@ class LiveVoiceManager(
     private var recorderThread: Thread? = null
     @Volatile
     private var playbackThread: Thread? = null
+    // Do not send microphone frames while MARK is speaking. Device-level echo
+    // cancellation is not reliable on every phone, and feeding MARK's own
+    // reply back into Gemini can create an endless self-conversation loop.
+    @Volatile
+    private var suppressMicrophone = false
+    @Volatile
+    private var lastPlaybackChunkAtNanos = 0L
 
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
@@ -962,6 +969,18 @@ class LiveVoiceManager(
                         running.get() &&
                         setupComplete
                     ) {
+                        val playbackStillSettling = suppressMicrophone && (
+                            playbackQueue.isNotEmpty() ||
+                                System.nanoTime() - lastPlaybackChunkAtNanos < 700_000_000L
+                            )
+
+                        if (playbackStillSettling) {
+                            // Keep reading so AudioRecord does not accumulate
+                            // stale speaker audio, but never send it upstream.
+                            continue
+                        }
+
+                        suppressMicrophone = false
                         val chunk = ByteArray(count)
 
                         System.arraycopy(
@@ -1102,6 +1121,8 @@ class LiveVoiceManager(
     private fun playAudio(bytes: ByteArray) {
         if (bytes.isEmpty() || !setupComplete || !voiceResponsesEnabled()) return
 
+        suppressMicrophone = true
+        lastPlaybackChunkAtNanos = System.nanoTime()
         val chunk = PlaybackChunk(playbackGeneration.get(), bytes)
         // Do not discard an older buffered speech chunk: dropping one creates
         // an audible word or syllable gap. If the queue is briefly saturated,
@@ -1112,6 +1133,7 @@ class LiveVoiceManager(
     private fun interruptPlayback() {
         playbackGeneration.incrementAndGet()
         playbackQueue.clear()
+        suppressMicrophone = false
 
         try {
             audioTrack?.let { track ->
@@ -1154,6 +1176,7 @@ class LiveVoiceManager(
         running.set(false)
         setupComplete = false
         clearTaskState()
+        suppressMicrophone = false
 
         try {
             recorderThread?.interrupt()
