@@ -259,6 +259,7 @@ class LiveVoiceManager(
                                             "When a tool response says confirmation is required, ask exactly one concise confirmation question in your normal MARK Live voice, then wait for the user's answer. The Android app does not speak a second local confirmation. " +
                                             "If the user says stop, cancel, or abort, call cancel_task immediately. " +
                                             "Never bypass passwords, biometrics, CAPTCHAs, Android permission dialogs, or security screens. " +
+                                            autopilotInstruction() +
                                             persistentMemoryInstruction()
                                         )
                                     )
@@ -281,6 +282,16 @@ class LiveVoiceManager(
             return " You may use these private persistent user memories when relevant: " +
                 memories.joinToString("; ") + ". Do not mention the memory system unless asked, " +
                 "and always follow the user's current request if it conflicts with an old memory."
+        }
+
+        private fun autopilotInstruction(): String {
+            val enabled = context.getSharedPreferences("jarvis_ui", Context.MODE_PRIVATE)
+                .getBoolean("autopilot", true)
+            return if (enabled) {
+                " Autopilot mode is enabled. For safe, reversible actions such as opening an app or Settings page, reading the visible screen, scrolling, ordinary non-sensitive taps, non-sensitive typing, and flashlight control, call the appropriate tool directly without asking the user for extra confirmation. The application still requires confirmation for sending, deleting, purchasing, paying, calling, sharing, posting, installing, changing security settings, deleting files, or any other consequential action; never bypass that enforcement. "
+            } else {
+                " Autopilot mode is disabled. Follow the normal confirmation policy, while still obeying the application’s mandatory confirmation checks for consequential actions. "
+            }
         }
 
         override fun onMessage(

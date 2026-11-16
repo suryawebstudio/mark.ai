@@ -171,6 +171,9 @@ class MainActivity : AppCompatActivity() {
         fun setWakeWord(enabled: Boolean) = runOnUiThread { setWakeWordEnabled(enabled) }
 
         @JavascriptInterface
+        fun setAutopilot(enabled: Boolean) = saveUiPreference("autopilot", enabled)
+
+        @JavascriptInterface
         fun getUiState(): String {
             val preferences = getSharedPreferences("jarvis_ui", MODE_PRIVATE)
             return JSONObject()
@@ -180,6 +183,7 @@ class MainActivity : AppCompatActivity() {
                 .put("autoListening", preferences.getBoolean("auto_listening", false))
                 .put("gestureWake", preferences.getBoolean("gesture_wake", false))
                 .put("wakeWord", preferences.getBoolean("wake_word", false))
+                .put("autopilot", preferences.getBoolean("autopilot", true))
                 .put("fullStorage", JarvisFileManager(this@MainActivity).isFullAccessEnabled())
                 .put("memoryCount", memoryStore.all().size)
                 .put("defaultAssistant", isDefaultAssistant())
