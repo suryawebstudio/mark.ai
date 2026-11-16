@@ -1,6 +1,7 @@
 package com.surya.jarvis
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -22,6 +23,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
@@ -273,11 +276,35 @@ class JarvisAccessibilityService : AccessibilityService() {
     private fun swipeElement(node: AccessibilityNodeInfo, direction: String, label: String): Pair<Boolean, String> {
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
-        val (startX, startY, endX, endY) = when (direction) {
-            "swipe_left" -> bounds.right.toFloat() to bounds.centerY().toFloat() to bounds.left.toFloat() to bounds.centerY().toFloat()
-            "swipe_right" -> bounds.left.toFloat() to bounds.centerY().toFloat() to bounds.right.toFloat() to bounds.centerY().toFloat()
-            "swipe_up" -> bounds.centerX().toFloat() to bounds.bottom.toFloat() to bounds.centerX().toFloat() to bounds.top.toFloat()
-            "swipe_down" -> bounds.centerX().toFloat() to bounds.top.toFloat() to bounds.centerX().toFloat() to bounds.bottom.toFloat()
+        val startX: Float
+        val startY: Float
+        val endX: Float
+        val endY: Float
+        when (direction) {
+            "swipe_left" -> {
+                startX = bounds.right.toFloat()
+                startY = bounds.centerY().toFloat()
+                endX = bounds.left.toFloat()
+                endY = bounds.centerY().toFloat()
+            }
+            "swipe_right" -> {
+                startX = bounds.left.toFloat()
+                startY = bounds.centerY().toFloat()
+                endX = bounds.right.toFloat()
+                endY = bounds.centerY().toFloat()
+            }
+            "swipe_up" -> {
+                startX = bounds.centerX().toFloat()
+                startY = bounds.bottom.toFloat()
+                endX = bounds.centerX().toFloat()
+                endY = bounds.top.toFloat()
+            }
+            "swipe_down" -> {
+                startX = bounds.centerX().toFloat()
+                startY = bounds.top.toFloat()
+                endX = bounds.centerX().toFloat()
+                endY = bounds.bottom.toFloat()
+            }
             else -> return false to "Invalid swipe direction"
         }
         return dispatchSwipeGesture(startX, startY, endX, endY, "Swiped $direction on '$label'.")
@@ -361,15 +388,32 @@ class JarvisAccessibilityService : AccessibilityService() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
             return false to "Multi-touch gestures require Android 7.0+"
         }
-        val (start1X, start1Y, end1X, end1Y) = if (pinchIn) {
-            centerX - radius to centerY to centerX - radius / 2 to centerY
+        val start1X: Float
+        val start1Y: Float
+        val end1X: Float
+        val end1Y: Float
+        val start2X: Float
+        val start2Y: Float
+        val end2X: Float
+        val end2Y: Float
+        if (pinchIn) {
+            start1X = centerX - radius
+            start1Y = centerY
+            end1X = centerX - radius / 2
+            end1Y = centerY
+            start2X = centerX + radius
+            start2Y = centerY
+            end2X = centerX + radius / 2
+            end2Y = centerY
         } else {
-            centerX - radius / 2 to centerY to centerX - radius to centerY
-        }
-        val (start2X, start2Y, end2X, end2Y) = if (pinchIn) {
-            centerX + radius to centerY to centerX + radius / 2 to centerY
-        } else {
-            centerX + radius / 2 to centerY to centerX + radius to centerY
+            start1X = centerX - radius / 2
+            start1Y = centerY
+            end1X = centerX - radius
+            end1Y = centerY
+            start2X = centerX + radius / 2
+            start2Y = centerY
+            end2X = centerX + radius
+            end2Y = centerY
         }
         val path1 = Path().apply { moveTo(start1X, start1Y); lineTo(end1X, end1Y) }
         val path2 = Path().apply { moveTo(start2X, start2Y); lineTo(end2X, end2Y) }
@@ -382,12 +426,12 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     private fun calculateSwipeDuration(x1: Float, y1: Float, x2: Float, y2: Float): Long {
         val distance = sqrt((x1 - x2).pow(2) + (y1 - y2).pow(2))
-        return (distance / 2f).coerceIn(200, 800).toLong()
+        return (distance / 2f).coerceIn(200f, 800f).toLong()
     }
 
     private fun calculateDragDuration(x1: Float, y1: Float, x2: Float, y2: Float): Long {
         val distance = sqrt((x1 - x2).pow(2) + (y1 - y2).pow(2))
-        return (distance / 1.5f).coerceIn(300, 1500).toLong()
+        return (distance / 1.5f).coerceIn(300f, 1500f).toLong()
     }
 
     private fun longClickableAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {

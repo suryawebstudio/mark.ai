@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.Locale
 import kotlinx.coroutines.runBlocking
+import com.surya.jarvis.ocr.OcrProcessor
 
 class LiveVoiceManager(
     private val context: Context,
