@@ -364,20 +364,42 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestDefaultAssistantRole() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            runCatching { startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
-                .onFailure { runJs("showToast('OPEN DEFAULT ASSISTANT SETTINGS MANUALLY')") }
+            openDefaultAssistantSettings()
             return
         }
         val roleManager = getSystemService(RoleManager::class.java)
         if (roleManager == null || !roleManager.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) {
-            runJs("showToast('THIS PHONE DOES NOT EXPOSE THE ASSISTANT ROLE')")
+            openDefaultAssistantSettings()
             return
         }
         if (roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
             runJs("showToast('MARK IS ALREADY THE DEFAULT ASSISTANT')")
             return
         }
-        defaultAssistantLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
+        runCatching {
+            defaultAssistantLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
+        }.onFailure {
+            openDefaultAssistantSettings()
+        }
+    }
+
+    private fun openDefaultAssistantSettings() {
+        val candidates = listOf(
+            Intent(Settings.ACTION_VOICE_INPUT_SETTINGS),
+            Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
+            Intent(Settings.ACTION_SETTINGS)
+        )
+        val intent = candidates.firstOrNull { it.resolveActivity(packageManager) != null }
+        if (intent == null) {
+            runJs("showToast('ANDROID DEFAULT ASSISTANT SETTINGS ARE UNAVAILABLE')")
+            return
+        }
+        runCatching {
+            startActivity(intent)
+            runJs("showToast('CHOOSE MARK AS YOUR DEFAULT ASSISTANT')")
+        }.onFailure {
+            runJs("showToast('OPEN DEFAULT ASSISTANT SETTINGS MANUALLY')")
+        }
     }
 
     private fun permissionGroups(): Map<String, Array<String>> = mapOf(
