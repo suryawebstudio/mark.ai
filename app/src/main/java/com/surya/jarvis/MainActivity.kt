@@ -77,6 +77,15 @@ class MainActivity : AppCompatActivity() {
         runJs("updateAssistantPermissionState();showToast(${JSONObject.quote(if (isAssistantPermissionGranted(key)) "PERMISSION ENABLED" else "PERMISSION NOT FULLY ENABLED")})")
     }
 
+    private var pendingCorePermission = ""
+    private val corePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        val key = pendingCorePermission
+        pendingCorePermission = ""
+        runJs("applyNativeSettings();showToast(${JSONObject.quote(if (isCorePermissionGranted(key)) "PERMISSION ENABLED" else "PERMISSION NOT FULLY ENABLED")})")
+    }
+
     private val voiceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
@@ -174,6 +183,7 @@ class MainActivity : AppCompatActivity() {
                 .put("fullStorage", JarvisFileManager(this@MainActivity).isFullAccessEnabled())
                 .put("memoryCount", memoryStore.all().size)
                 .put("defaultAssistant", isDefaultAssistant())
+                .put("corePermissions", corePermissionState())
                 .put("assistantPermissions", assistantPermissionState())
                 .toString()
         }
@@ -212,6 +222,9 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun requestAssistantPermission(key: String) = runOnUiThread { requestAssistantPermissionInternal(key) }
+
+        @JavascriptInterface
+        fun requestCorePermission(key: String) = runOnUiThread { requestCorePermissionInternal(key) }
     }
 
     private fun requestVoiceStart() {
@@ -304,6 +317,50 @@ class MainActivity : AppCompatActivity() {
     private fun isDefaultAssistant(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
             getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
+
+    private fun isCorePermissionGranted(key: String): Boolean = when (key) {
+        "microphone" -> ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        "camera" -> ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        "notifications" -> Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        "accessibility" -> JarvisAccessibilityService.isEnabled()
+        "storage" -> JarvisFileManager(this).isFullAccessEnabled()
+        "defaultAssistant" -> isDefaultAssistant()
+        else -> false
+    }
+
+    private fun corePermissionState(): JSONObject = JSONObject().apply {
+        listOf("microphone", "camera", "notifications", "accessibility", "storage", "defaultAssistant").forEach {
+            put(it, isCorePermissionGranted(it))
+        }
+    }
+
+    private fun requestCorePermissionInternal(key: String) {
+        when (key) {
+            "microphone" -> requestSingleCorePermission(key, Manifest.permission.RECORD_AUDIO)
+            "camera" -> requestSingleCorePermission(key, Manifest.permission.CAMERA)
+            "notifications" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                requestSingleCorePermission(key, Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                runJs("showToast('NOTIFICATION PERMISSION IS BUILT IN ON THIS ANDROID VERSION')")
+            }
+            "accessibility" -> runCatching {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }.onFailure { runJs("showToast('OPEN ACCESSIBILITY SETTINGS MANUALLY')") }
+            "storage" -> runOnUiThread { toggleFullStorageAccess() }
+            "defaultAssistant" -> requestDefaultAssistantRole()
+            else -> runJs("showToast('UNKNOWN MARK ACCESS SETTING')")
+        }
+    }
+
+    private fun requestSingleCorePermission(key: String, permission: String) {
+        if (isCorePermissionGranted(key)) {
+            runJs("showToast('PERMISSION ALREADY ENABLED')")
+            return
+        }
+        pendingCorePermission = key
+        corePermissionLauncher.launch(arrayOf(permission))
+    }
 
     private fun requestDefaultAssistantRole() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
