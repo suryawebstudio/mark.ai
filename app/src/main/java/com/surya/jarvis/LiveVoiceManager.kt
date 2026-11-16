@@ -40,6 +40,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.Locale
+import kotlinx.coroutines.runBlocking
 
 class LiveVoiceManager(
     private val context: Context,
@@ -124,6 +125,7 @@ class LiveVoiceManager(
 
     private val fileManager = JarvisFileManager(context.applicationContext)
     private val memoryStore = JarvisMemoryStore(context.applicationContext)
+    private val ocrProcessor = OcrProcessor(context.applicationContext)
 
     @Volatile
     private var setupComplete = false
@@ -460,6 +462,20 @@ class LiveVoiceManager(
             put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
         }
 
+        val visualTap = JSONObject().apply {
+            put("name", "visual_tap")
+            put("description", "Perform a single visual tap on a grid cell from the latest inspect_visual_screen. Requires Android 11+ and enabled MARK Accessibility. The visual token is single-use and expires in 15 seconds.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject()
+                    .put("cell", JSONObject().put("type", "STRING").put("description", "Grid cell such as C7 from the latest visual inspection (columns A-H, rows 1-12)."))
+                    .put("token", JSONObject().put("type", "STRING").put("description", "The short-lived grounding_token from the latest inspect_visual_screen result."))
+                    .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
+                )
+                put("required", JSONArray().put("cell").put("token"))
+            )
+        }
+
         val setFlashlight = JSONObject().apply {
             put("name", "set_flashlight")
             put("description", "Turn the phone flashlight on or off. This uses Android's flashlight API and requires the user to grant camera permission; no camera preview is opened.")
@@ -486,7 +502,7 @@ class LiveVoiceManager(
             put("name", "control_visible_screen")
             put(
                 "description",
-                "Perform one narrow action on the current visible screen: tap a semantic control, type into a visible text field, scroll, use Back, Home, or recent apps, or perform one guarded visual_tap on a custom-drawn target. Accessibility must be enabled by the user. For tap, type, and scroll, use the exact snapshot_id and ref returned by the latest inspect_visible_screen; stale refs are rejected. For visual_tap, use only the exact grid cell and grounding_token returned by the latest inspect_visual_screen; visual taps are single-use and repeated same-area coordinates are rejected until a fresh visual inspection."
+                "Perform one narrow action on the current visible screen: tap, long press, double tap, swipe, drag, pinch zoom, type into a visible text field, scroll, use Back, Home, or recent apps. Accessibility must be enabled by the user. For tap, long_press, double_tap, type, scroll, swipe, drag, pinch, use the exact snapshot_id and ref returned by the latest inspect_visible_screen; stale refs are rejected."
             )
             put(
                 "parameters",
@@ -495,14 +511,12 @@ class LiveVoiceManager(
                     put(
                         "properties",
                         JSONObject()
-                            .put("action", JSONObject().put("type", "STRING").put("enum", JSONArray().put("tap").put("visual_tap").put("type").put("scroll").put("back").put("home").put("overview")))
-                            .put("snapshot_id", JSONObject().put("type", "STRING").put("description", "The snapshot_id returned by the latest inspect_visible_screen. Required for tap, type, and scroll."))
-                            .put("ref", JSONObject().put("type", "STRING").put("description", "The exact ref returned by the latest inspect_visible_screen, such as @a1abc123:e1. Required for tap, type, and scroll."))
+                            .put("action", JSONObject().put("type", "STRING").put("enum", JSONArray().put("tap").put("long_press").put("double_tap").put("type").put("scroll").put("swipe_left").put("swipe_right").put("swipe_up").put("swipe_down").put("drag").put("pinch_in").put("pinch_out").put("back").put("home").put("overview")))
+                            .put("snapshot_id", JSONObject().put("type", "STRING").put("description", "The snapshot_id returned by the latest inspect_visible_screen. Required for tap, long_press, double_tap, type, scroll, swipe, drag, pinch."))
+                            .put("ref", JSONObject().put("type", "STRING").put("description", "The exact ref returned by the latest inspect_visible_screen, such as @a1abc123:e1. Required for tap, long_press, double_tap, type, scroll, swipe, drag, pinch."))
                             .put("target", JSONObject().put("type", "STRING").put("description", "Optional human-readable label used for confirmation context; do not use it to guess a target."))
-                            .put("text", JSONObject().put("type", "STRING").put("description", "Text to type when action is type."))
-                            .put("direction", JSONObject().put("type", "STRING").put("enum", JSONArray().put("up").put("down")))
-                            .put("visual_cell", JSONObject().put("type", "STRING").put("description", "For visual_tap only: exact grid cell such as C7 from the latest visual inspection."))
-                            .put("visual_token", JSONObject().put("type", "STRING").put("description", "For visual_tap only: exact short-lived grounding_token from the latest inspect_visual_screen result."))
+                            .put("text", JSONObject().put("type", "STRING").put("description", "Text to type when action is type. For drag, use as targetX. For swipe/drag/pinch, not used."))
+                            .put("direction", JSONObject().put("type", "STRING").put("description", "For scroll: up/down. For swipe: swipe_left/swipe_right/swipe_up/swipe_down. For drag: targetY."))
                             .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
                     )
                     put("required", JSONArray().put("action"))
@@ -573,7 +587,7 @@ class LiveVoiceManager(
         return JSONArray().put(
             JSONObject().put(
                 "functionDeclarations",
-                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(captureCameraImage).put(inspectScreen).put(inspectVisualScreen).put(controlScreen).put(startTask).put(cancelTask).put(completeTask).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
+                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(captureCameraImage).put(inspectScreen).put(inspectVisualScreen).put(visualTap).put(controlScreen).put(startTask).put(cancelTask).put(completeTask).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
             )
         )
     }
@@ -737,17 +751,18 @@ class LiveVoiceManager(
     }
 
     private fun isTaskAction(name: String): Boolean =
-        name == "launch_app" || name == "open_settings_page" || name == "set_flashlight" || name == "capture_camera_image" || name == "control_visible_screen" ||
+        name == "launch_app" || name == "open_settings_page" || name == "set_flashlight" || name == "capture_camera_image" || name == "control_visible_screen" || name == "visual_tap" ||
             name == "list_files" || name == "create_text_file" ||
             name == "edit_text_file" || name == "delete_file"
 
     private fun isPotentiallySensitive(name: String, args: JSONObject): Boolean {
         if (name == "delete_file") return true
-        if (name != "control_visible_screen") return false
+        if (name != "control_visible_screen" && name != "visual_tap") return false
         val value = listOf(
             args.optString("action"),
             args.optString("target"),
-            args.optString("text")
+            args.optString("text"),
+            args.optString("cell")
         ).joinToString(" ").lowercase(Locale.ROOT)
         return listOf(
             "send", "submit", "purchase", "buy", "pay", "delete", "remove",
@@ -770,6 +785,7 @@ class LiveVoiceManager(
                 "set_flashlight" -> setFlashlight(args.optBoolean("enabled", false))
                 "capture_camera_image" -> captureCameraImage()
                 "inspect_visual_screen" -> captureVisualScreen()
+                "visual_tap" -> performVisualTap(args.optString("cell"), args.optString("token"), args.optBoolean("confirmed", false))
                 "list_files" -> fileManager.listFiles()
                 "create_text_file" -> fileManager.createTextFile(
                     args.optString("name"),
@@ -817,12 +833,24 @@ class LiveVoiceManager(
                 "Android denied or could not complete the one-shot screen capture. Try again after the visible screen settles."
             }
         }
+
+        // Decode bitmap for OCR
+        val bitmap = decodeBase64ToBitmap(capture.jpegBase64)
+        val ocrResult = runBlocking { ocrProcessor.recognizeText(bitmap) }
+        bitmap.recycle()
+
+        val ocrText = if (ocrResult.fullText.isNotBlank()) {
+            "\n\nOCR extracted text:\n${ocrResult.fullText}"
+        } else {
+            ""
+        }
+
         val message = JSONObject().apply {
             put("clientContent", JSONObject().apply {
                 put("turns", JSONArray().put(JSONObject().apply {
                     put("role", "user")
                     put("parts", JSONArray()
-                        .put(JSONObject().put("text", "Inspect this single current phone screenshot only as a visual fallback. It includes an 8-column by 12-row grid: columns A-H and rows 1-12. Describe visible custom-drawn controls and their approximate grid cells. Do not infer hidden, protected, or unreadable content, and do not claim that an action was performed."))
+                        .put(JSONObject().put("text", "Inspect this single current phone screenshot only as a visual fallback. It includes an 8-column by 12-row grid: columns A-H and rows 1-12. Describe visible custom-drawn controls and their approximate grid cells. Do not infer hidden, protected, or unreadable content, and do not claim that an action was performed.$ocrText"))
                         .put(JSONObject().put("inlineData", JSONObject()
                             .put("mimeType", "image/jpeg")
                             .put("data", capture.jpegBase64)))
@@ -835,7 +863,30 @@ class LiveVoiceManager(
             return false to "The visual screenshot could not be sent to the live vision session."
         }
         status("VISUAL SCREEN SENT ${capture.width}x${capture.height}")
-        return true to "One visual screen inspection was sent to the live vision session with an 8 by 12 grounding grid. grounding_token=${capture.token}. Use this token only for one clearly visible visual_tap, then inspect again."
+        return true to "One visual screen inspection was sent to the live vision session with an 8 by 12 grounding grid. grounding_token=${capture.token}. OCR blocks: ${ocrResult.blocks.size}. Use this token only for one clearly visible visual_tap, then inspect again."
+    }
+
+    private fun decodeBase64ToBitmap(base64: String): Bitmap {
+        val bytes = Base64.decode(base64, Base64.DEFAULT)
+        return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }
+
+    private fun performVisualTap(cell: String, token: String, confirmed: Boolean): Pair<Boolean, String> {
+        if (!JarvisAccessibilityService.isEnabled()) {
+            return false to "Accessibility control is not enabled. Enable MARK in Android Accessibility settings first."
+        }
+        // Delegate to accessibility service with a dummy ref since visual_tap uses cell+token
+        return JarvisAccessibilityService.control(
+            snapshotId = "visual",
+            ref = "visual_tap",
+            action = "visual_tap",
+            target = cell,
+            text = "",
+            direction = "",
+            confirmed = confirmed,
+            visualCell = cell,
+            visualToken = token
+        )
     }
 
     private fun launchInstalledApp(requestedName: String): Pair<Boolean, String> {
@@ -1412,6 +1463,11 @@ class LiveVoiceManager(
 
         echoCanceler = null
         noiseSuppressor = null
+
+        try {
+            ocrProcessor.close()
+        } catch (_: Exception) {
+        }
 
         try {
             webSocket?.close(1000, "User stopped")

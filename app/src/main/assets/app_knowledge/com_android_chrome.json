@@ -1,0 +1,106 @@
+{
+  "packageName": "com.android.chrome",
+  "appName": "Chrome",
+  "versionCode": 120000000,
+  "versionName": "120.0.0.0",
+  "launcherActivity": "com.google.android.apps.chrome.Main",
+  "mainActivities": ["com.google.android.apps.chrome.Main", "org.chromium.chrome.browser.ChromeTabbedActivity"],
+  "accessibilityLevel": "PARTIAL",
+  "keyElements": {
+    "url_bar": {
+      "role": "EditText",
+      "resourceIds": ["com.android.chrome:id/url_bar"],
+      "textPatterns": ["Search or type URL"],
+      "actionTypes": ["type", "click"]
+    },
+    "search_box_text": {
+      "role": "EditText",
+      "resourceIds": ["com.android.chrome:id/search_box_text"],
+      "textPatterns": ["Search or type URL"],
+      "actionTypes": ["type", "click"]
+    },
+    "menu_button": {
+      "role": "Button",
+      "resourceIds": ["com.android.chrome:id/menu_button"],
+      "descriptionPatterns": ["More", "Menu"],
+      "actionTypes": ["click"]
+    },
+    "tab_switcher_button": {
+      "role": "Button",
+      "resourceIds": ["com.android.chrome:id/tab_switcher_button"],
+      "descriptionPatterns": ["Tab switcher", "Switch tabs"],
+      "actionTypes": ["click"]
+    },
+    "new_tab_button": {
+      "role": "Button",
+      "resourceIds": ["com.android.chrome:id/new_tab_button"],
+      "descriptionPatterns": ["New tab"],
+      "actionTypes": ["click"]
+    },
+    "back_button": {
+      "role": "Button",
+      "descriptionPatterns": ["Back"],
+      "actionTypes": ["click"]
+    },
+    "forward_button": {
+      "role": "Button",
+      "descriptionPatterns": ["Forward"],
+      "actionTypes": ["click"]
+    },
+    "refresh_button": {
+      "role": "Button",
+      "descriptionPatterns": ["Refresh", "Reload"],
+      "actionTypes": ["click"]
+    }
+  },
+  "navigationPatterns": {
+    "new_tab_to_url": {
+      "fromScreen": "new_tab",
+      "toScreen": "webpage",
+      "action": { "type": "tap", "params": { "targetRole": "search_box_text" } },
+      "verification": { "type": "element_present", "params": { "targetRole": "url_bar" } }
+    }
+  },
+  "workflows": {
+    "open_url": {
+      "name": "open_url",
+      "description": "Open a URL in Chrome",
+      "triggers": ["open", "go to", "visit", "chrome", "url", "website"],
+      "steps": [
+        { "action": "tap", "targetRole": "search_box_text", "verification": { "type": "element_present", "params": { "targetRole": "url_bar" } } },
+        { "action": "type", "targetRole": "url_bar", "params": { "text": "{{url}}" }, "verification": { "type": "element_present", "params": { "targetRole": "url_bar" } } }
+      ]
+    },
+    "search_web": {
+      "name": "search_web",
+      "description": "Search the web in Chrome",
+      "triggers": ["search", "google", "find", "chrome"],
+      "steps": [
+        { "action": "tap", "targetRole": "search_box_text", "verification": { "type": "element_present", "params": { "targetRole": "url_bar" } } },
+        { "action": "type", "targetRole": "url_bar", "params": { "text": "{{query}}" }, "verification": { "type": "screen_change", "params": {} } }
+      ]
+    },
+    "switch_tab": {
+      "name": "switch_tab",
+      "description": "Switch to another tab",
+      "triggers": ["tab", "switch", "chrome"],
+      "steps": [
+        { "action": "tap", "targetRole": "tab_switcher_button", "verification": { "type": "element_present", "params": { "targetRole": "tab_grid" } } }
+      ]
+    },
+    "open_incognito": {
+      "name": "open_incognito",
+      "description": "Open an incognito tab",
+      "triggers": ["incognito", "private", "chrome"],
+      "steps": [
+        { "action": "tap", "targetRole": "menu_button", "verification": { "type": "element_present", "params": { "targetRole": "menu_list" } } },
+        { "action": "tap", "targetRole": "menu_item", "params": { "matchText": "New incognito tab" }, "verification": { "type": "element_present", "params": { "targetRole": "incognito_indicator" } } }
+      ]
+    }
+  },
+  "commonDialogs": [
+    { "trigger": "permission", "textPatterns": ["Permission", "Allow", "Deny"], "action": "user_guidance" }
+  ],
+  "intents": {},
+  "deepLinks": {}
+}

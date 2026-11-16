@@ -3,6 +3,8 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.3.21"
+    id("kotlin-kapt")
 }
 
 val keystorePropsFile = rootProject.file("release.properties")
@@ -162,4 +164,18 @@ dependencies {
     testImplementation(libs.junit)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.alphacephei:vosk-android:0.3.75")
+
+    // ML Kit Text Recognition v2 (bundled model)
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+
+    // Room database for learned app knowledge
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    kapt("androidx.room:room-compiler:2.6.1")
+
+    // Kotlinx Serialization for JSON knowledge files
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 }

@@ -5,11 +5,13 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.util.Base64
 import android.view.Display
+import android.view.ViewConfiguration
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
@@ -20,6 +22,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.sqrt
 
 /**
  * Provides narrow, visible-screen automation for MARK.
@@ -172,7 +175,12 @@ class JarvisAccessibilityService : AccessibilityService() {
             "tap", "click", "press" -> tapRef(node, entry.label)
             "type", "input", "write" -> typeIntoRef(node, text, entry.label)
             "scroll" -> scrollRef(node, direction)
-            else -> false to "Unsupported visible-screen action. Use tap, type, scroll, back, home, or overview."
+            "long_press" -> longPressRef(node, entry.label)
+            "swipe_left", "swipe_right", "swipe_up", "swipe_down" -> swipeElement(node, action, entry.label)
+            "drag" -> dragElement(node, text.toFloatOrNull() ?: 0f, direction.toFloatOrNull() ?: 0f, entry.label)
+            "double_tap" -> doubleTapRef(node, entry.label)
+            "pinch_in", "pinch_out" -> pinchZoom(node, action, entry.label)
+            else -> false to "Unsupported visible-screen action. Use tap, type, scroll, long_press, swipe, drag, double_tap, pinch, back, home, or overview."
         }
     }
 
@@ -254,6 +262,143 @@ class JarvisAccessibilityService : AccessibilityService() {
         } else false to "The visible area could not be scrolled."
     }
 
+    private fun longPressRef(node: AccessibilityNodeInfo, label: String): Pair<Boolean, String> {
+        val target = if (node.isLongClickable) node else longClickableAncestor(node)
+            ?: return false to "Element does not support long press."
+        val bounds = Rect()
+        target.getBoundsInScreen(bounds)
+        return dispatchLongPressGesture(bounds.centerX().toFloat(), bounds.centerY().toFloat(), "Long-pressed '$label'.")
+    }
+
+    private fun swipeElement(node: AccessibilityNodeInfo, direction: String, label: String): Pair<Boolean, String> {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        val (startX, startY, endX, endY) = when (direction) {
+            "swipe_left" -> bounds.right.toFloat() to bounds.centerY().toFloat() to bounds.left.toFloat() to bounds.centerY().toFloat()
+            "swipe_right" -> bounds.left.toFloat() to bounds.centerY().toFloat() to bounds.right.toFloat() to bounds.centerY().toFloat()
+            "swipe_up" -> bounds.centerX().toFloat() to bounds.bottom.toFloat() to bounds.centerX().toFloat() to bounds.top.toFloat()
+            "swipe_down" -> bounds.centerX().toFloat() to bounds.top.toFloat() to bounds.centerX().toFloat() to bounds.bottom.toFloat()
+            else -> return false to "Invalid swipe direction"
+        }
+        return dispatchSwipeGesture(startX, startY, endX, endY, "Swiped $direction on '$label'.")
+    }
+
+    private fun dragElement(node: AccessibilityNodeInfo, targetX: Float, targetY: Float, label: String): Pair<Boolean, String> {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        val startX = bounds.centerX().toFloat()
+        val startY = bounds.centerY().toFloat()
+        return dispatchDragGesture(startX, startY, targetX, targetY, "Dragged '$label'.")
+    }
+
+    private fun doubleTapRef(node: AccessibilityNodeInfo, label: String): Pair<Boolean, String> {
+        val clickable = if (node.isClickable) node else clickableAncestor(node)
+            ?: return false to "Element not clickable for double tap."
+        val bounds = Rect()
+        clickable.getBoundsInScreen(bounds)
+        return dispatchDoubleTapGesture(bounds.centerX().toFloat(), bounds.centerY().toFloat(), "Double-tapped '$label'.")
+    }
+
+    private fun pinchZoom(node: AccessibilityNodeInfo, action: String, label: String): Pair<Boolean, String> {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        val centerX = bounds.centerX().toFloat()
+        val centerY = bounds.centerY().toFloat()
+        val radius = min(bounds.width(), bounds.height()) / 4f
+        return if (action == "pinch_in") {
+            dispatchPinchGesture(centerX, centerY, radius, true, "Pinched in on '$label'.")
+        } else {
+            dispatchPinchGesture(centerX, centerY, radius, false, "Pinched out on '$label'.")
+        }
+    }
+
+    private fun dispatchSwipeGesture(startX: Float, startY: Float, endX: Float, endY: Float, description: String): Pair<Boolean, String> {
+        val path = Path().apply {
+            moveTo(startX, startY)
+            lineTo(endX, endY)
+        }
+        val duration = calculateSwipeDuration(startX, startY, endX, endY)
+        val stroke = GestureDescription.StrokeDescription(path, 0, duration)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val accepted = dispatchGesture(gesture, null, null)
+        return if (accepted) true to description else false to "Swipe gesture rejected."
+    }
+
+    private fun dispatchDragGesture(startX: Float, startY: Float, endX: Float, endY: Float, description: String): Pair<Boolean, String> {
+        val path = Path().apply {
+            moveTo(startX, startY)
+            lineTo((startX + endX) / 2, (startY + endY) / 2)
+            lineTo(endX, endY)
+        }
+        val duration = calculateDragDuration(startX, startY, endX, endY)
+        val stroke = GestureDescription.StrokeDescription(path, 0, duration)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val accepted = dispatchGesture(gesture, null, null)
+        return if (accepted) true to description else false to "Drag gesture rejected."
+    }
+
+    private fun dispatchLongPressGesture(x: Float, y: Float, description: String): Pair<Boolean, String> {
+        val path = Path().apply { moveTo(x, y) }
+        val duration = ViewConfiguration.getLongPressTimeout().toLong()
+        val stroke = GestureDescription.StrokeDescription(path, 0, duration)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val accepted = dispatchGesture(gesture, null, null)
+        return if (accepted) true to description else false to "Long press gesture rejected."
+    }
+
+    private fun dispatchDoubleTapGesture(x: Float, y: Float, description: String): Pair<Boolean, String> {
+        val path = Path().apply { moveTo(x, y) }
+        val tapDuration = ViewConfiguration.getTapTimeout().toLong()
+        val doubleTapInterval = ViewConfiguration.getDoubleTapTimeout().toLong()
+        val stroke1 = GestureDescription.StrokeDescription(path, 0, tapDuration)
+        val stroke2 = GestureDescription.StrokeDescription(path, doubleTapInterval, tapDuration)
+        val gesture = GestureDescription.Builder().addStroke(stroke1).addStroke(stroke2).build()
+        val accepted = dispatchGesture(gesture, null, null)
+        return if (accepted) true to description else false to "Double tap gesture rejected."
+    }
+
+    private fun dispatchPinchGesture(centerX: Float, centerY: Float, radius: Float, pinchIn: Boolean, description: String): Pair<Boolean, String> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return false to "Multi-touch gestures require Android 7.0+"
+        }
+        val (start1X, start1Y, end1X, end1Y) = if (pinchIn) {
+            centerX - radius to centerY to centerX - radius / 2 to centerY
+        } else {
+            centerX - radius / 2 to centerY to centerX - radius to centerY
+        }
+        val (start2X, start2Y, end2X, end2Y) = if (pinchIn) {
+            centerX + radius to centerY to centerX + radius / 2 to centerY
+        } else {
+            centerX + radius / 2 to centerY to centerX + radius to centerY
+        }
+        val path1 = Path().apply { moveTo(start1X, start1Y); lineTo(end1X, end1Y) }
+        val path2 = Path().apply { moveTo(start2X, start2Y); lineTo(end2X, end2Y) }
+        val stroke1 = GestureDescription.StrokeDescription(path1, 0, 500, true)
+        val stroke2 = stroke1.continueStroke(path2, 0, 500, false)
+        val gesture = GestureDescription.Builder().addStroke(stroke1).addStroke(stroke2).build()
+        val accepted = dispatchGesture(gesture, null, null)
+        return if (accepted) true to description else false to "Pinch gesture rejected."
+    }
+
+    private fun calculateSwipeDuration(x1: Float, y1: Float, x2: Float, y2: Float): Long {
+        val distance = sqrt((x1 - x2).pow(2) + (y1 - y2).pow(2))
+        return (distance / 2f).coerceIn(200, 800).toLong()
+    }
+
+    private fun calculateDragDuration(x1: Float, y1: Float, x2: Float, y2: Float): Long {
+        val distance = sqrt((x1 - x2).pow(2) + (y1 - y2).pow(2))
+        return (distance / 1.5f).coerceIn(300, 1500).toLong()
+    }
+
+    private fun longClickableAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var parent = node.parent
+        while (parent != null) {
+            if (parent.isLongClickable) return parent
+            parent = parent.parent
+        }
+        return null
+    }
+
     private fun globalAction(action: Int, successMessage: String): Pair<Boolean, String> =
         if (performGlobalAction(action)) true to successMessage
         else false to "Android rejected that navigation action."
@@ -300,6 +445,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         val executor = Executors.newSingleThreadExecutor()
         val latch = CountDownLatch(1)
         var result: VisualCapture? = null
+        var captureError: String? = null
         try {
             takeScreenshot(
                 Display.DEFAULT_DISPLAY,
@@ -340,6 +486,15 @@ class JarvisAccessibilityService : AccessibilityService() {
                     }
 
                     override fun onFailure(errorCode: Int) {
+                        captureError = when (errorCode) {
+                            ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR -> "Internal error during screenshot capture"
+                            ERROR_TAKE_SCREENSHOT_NO_ACCESSIBILITY_ACCESS -> "Accessibility access lost. Re-enable MARK in Accessibility settings."
+                            ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT -> "Rate limited. Wait 1 second before retrying."
+                            ERROR_TAKE_SCREENSHOT_INVALID_DISPLAY -> "Invalid display ID"
+                            ERROR_TAKE_SCREENSHOT_INVALID_WINDOW -> "Invalid window ID"
+                            ERROR_TAKE_SCREENSHOT_SECURE_WINDOW -> "Secure window (banking/auth) - screenshots blocked by system"
+                            else -> "Unknown screenshot error: $errorCode"
+                        }
                         latch.countDown()
                     }
                 }
@@ -349,6 +504,9 @@ class JarvisAccessibilityService : AccessibilityService() {
             return false to null
         } finally {
             executor.shutdownNow()
+        }
+        if (captureError != null) {
+            return false to null
         }
         return (result != null) to result
     }
