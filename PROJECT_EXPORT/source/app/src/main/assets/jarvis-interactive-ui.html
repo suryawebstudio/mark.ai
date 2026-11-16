@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#050505">
+<title>MARK — Interactive Core</title>
+<style>
+:root{--gold:#39aaff;--bg:#000000}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:#eee;font-family:Inter,system-ui,sans-serif;touch-action:pan-y}
+.app{height:100dvh;max-width:680px;margin:auto;padding:18px 19px 16px;display:flex;flex-direction:column;position:relative;background:#000000}
+header{display:flex;align-items:center;justify-content:space-between;z-index:2}
+.brand{font-size:19px;font-weight:800;letter-spacing:5px}.brand span{color:var(--gold)}
+.nav{display:flex;gap:7px}.nav button{border:1px solid #1d3448;background:#0b1622;color:#a9c7df;border-radius:30px;padding:10px 13px;font-size:12px}
+.status{text-align:center;margin-top:28px;color:#4b9bd5;font-size:10px;letter-spacing:4px}
+.status i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gold);box-shadow:0 0 12px var(--gold);margin-right:8px}
+.visual{flex:1;min-height:250px;display:flex;align-items:center;justify-content:center;position:relative;touch-action:none}
+canvas{width:100%;height:100%;max-height:510px;display:block;touch-action:none}
+.hint{text-align:center;color:#8b806b;font-size:12px;letter-spacing:2px;margin-top:-5px}
+.hint strong{color:var(--gold);font-weight:500}
+.bottom{text-align:center;padding:19px 0 13px}
+.mic{width:64px;height:64px;border-radius:50%;border:1px solid #246da4;background:#0b2034;color:var(--gold);font-size:26px;box-shadow:0 0 25px #d99b1c25;transition:.25s}
+.mic.active{background:#103b60;box-shadow:0 0 38px #168fff88;transform:scale(1.08)}
+.bottom p{font-size:10px;color:#777;margin-top:10px;letter-spacing:2px}
+.composer{display:flex;gap:9px;align-items:center;border:1px solid #20394d;border-radius:30px;padding:7px 8px 7px 17px;background:#111}
+.composer input{background:none;border:0;outline:none;color:white;flex:1;min-width:0;font-size:14px}
+.composer button{border:0;background:#36a8f5;color:#130e03;width:38px;height:38px;border-radius:50%;font-size:18px}
+.panel{position:absolute;inset:0;background:#080808f5;z-index:5;padding:24px;display:none;flex-direction:column}
+.panel.show{display:flex!important;visibility:visible;opacity:1}.panelhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
+.panel h2{font-size:19px;letter-spacing:2px}.close{border:1px solid #333;border-radius:50%;width:38px;height:38px;color:white;background:#171717;font-size:20px}
+.messages{flex:1;overflow:auto;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:86%;padding:13px 16px;border-radius:17px;font-size:14px;line-height:1.5}
+.bot{background:#0c1c2b;border:1px solid #1c4564;align-self:flex-start}.user{background:#103653;align-self:flex-end}
+.settings-scroll{flex:1;overflow:auto;padding-right:2px}.setting-group{margin-bottom:22px}.setting-group h3{margin:0 0 9px;color:#6fbdf0;font-size:10px;letter-spacing:2px;text-transform:uppercase}.setting-card{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 15px;margin-bottom:8px;background:#0b1722;border:1px solid #203b50;border-radius:14px;color:#d8e8f5}.setting-card strong{display:block;font-size:13px;font-weight:600}.setting-card small{display:block;margin-top:4px;color:#7890a2;font-size:10px;line-height:1.35}.setting-action{flex:0 0 auto;min-width:74px;padding:8px 10px;border:1px solid #2f77a8;border-radius:18px;background:#102b40;color:#8dd0ff;font-size:10px;font-weight:700;letter-spacing:.6px}.setting-action.enabled{border-color:#27794f;background:#0e2a20;color:#77e3a8}.setting-toggle{width:40px;height:22px;accent-color:#36a8f5}.setting-select{color:#9dcced;font-size:12px}.setting-card.disabled{opacity:.62}
+.setting input{accent-color:#36a8f5}.historyitem{padding:14px;background:#0b1722;border:1px solid #203447;border-radius:14px;margin-bottom:9px;color:#ccc;font-size:14px}
+</style>
+</head>
+<body>
+<div class="app">
+<header><div class="brand">MARK<span>.</span></div><nav class="nav">
+<button onclick="openPanel('settings')">⚙ Settings</button><button onclick="openPanel('history')">History</button><button onclick="openPanel('chat')">Chat</button>
+</nav></header>
+<div class="status"><i></i><span id="status">SYSTEM ONLINE</span></div>
+<div class="visual" id="visual"><canvas id="sphere"></canvas></div>
+<div class="hint" id="hint">TOUCH THE CORE TO INTERACT</div>
+<div class="bottom"><button class="mic" id="mic" onclick="toggleVoice()">⌁</button><p id="micLabel">TAP TO SPEAK</p></div>
+<div class="composer"><input id="message" placeholder="Ask MARK anything..." onkeydown="if(event.key==='Enter')sendMessage()"><button onclick="sendMessage()">↑</button></div>
+
+<section class="panel" id="settings"><div class="panelhead"><h2>SETTINGS</h2><button class="close" onclick="closePanels()">×</button></div><div class="settings-scroll">
+<div class="setting-group"><h3>MARK access</h3>
+<div class="setting-card" id="access-microphone"><div><strong>Microphone</strong><small>Voice conversations and wake-word listening</small></div><button class="setting-action" onclick="requestCore('microphone')">CHECK</button></div>
+<div class="setting-card" id="access-camera"><div><strong>Camera</strong><small>Flashlight control and user-requested camera images</small></div><button class="setting-action" onclick="requestCore('camera')">CHECK</button></div>
+<div class="setting-card" id="access-notifications"><div><strong>Notifications</strong><small>Background voice service status on Android 13+</small></div><button class="setting-action" onclick="requestCore('notifications')">CHECK</button></div>
+<div class="setting-card" id="access-accessibility"><div><strong>Accessibility control</strong><small>Read and operate visible controls with semantic refs</small></div><button class="setting-action" onclick="requestCore('accessibility')">OPEN</button></div>
+<div class="setting-card" id="access-storage"><div><strong>Full storage access</strong><small>List, create, edit, share, and delete shared-storage files</small></div><button class="setting-action" onclick="requestCore('storage')">OPEN</button></div>
+<div class="setting-card" id="access-defaultAssistant"><div><strong>Default assistant</strong><small>Let Android invoke MARK as the system assistant</small></div><button class="setting-action" onclick="requestCore('defaultAssistant')">OPEN</button></div>
+</div>
+<div class="setting-group"><h3>Assistant capabilities</h3>
+<div class="setting-card" data-permission="contacts"><div><strong>Contacts</strong><small>Read and update contacts when explicitly requested</small></div><button class="setting-action" onclick="requestAssistant('contacts')">CHECK</button></div>
+<div class="setting-card" data-permission="calls"><div><strong>Phone calls</strong><small>Call controls and phone-state context</small></div><button class="setting-action" onclick="requestAssistant('calls')">CHECK</button></div>
+<div class="setting-card" data-permission="sms"><div><strong>SMS</strong><small>Read and send messages only with confirmation</small></div><button class="setting-action" onclick="requestAssistant('sms')">CHECK</button></div>
+<div class="setting-card" data-permission="calendar"><div><strong>Calendar</strong><small>Read and update calendar events</small></div><button class="setting-action" onclick="requestAssistant('calendar')">CHECK</button></div>
+<div class="setting-card" data-permission="bluetooth"><div><strong>Bluetooth</strong><small>Discover and connect to nearby devices</small></div><button class="setting-action" onclick="requestAssistant('bluetooth')">CHECK</button></div>
+<div class="setting-card" data-permission="notifications"><div><strong>Notification access</strong><small>Read notifications through Android’s listener settings</small></div><button class="setting-action" onclick="requestAssistant('notifications')">OPEN</button></div>
+<div class="setting-card" data-permission="callLog"><div><strong>Call history</strong><small>Read and update call-log records</small></div><button class="setting-action" onclick="requestAssistant('callLog')">CHECK</button></div>
+<div class="setting-card" data-permission="media"><div><strong>Photos and media</strong><small>Access selected media when a task requires it</small></div><button class="setting-action" onclick="requestAssistant('media')">CHECK</button></div>
+<div class="setting-card" data-permission="alarms"><div><strong>Exact alarms</strong><small>Schedule time-sensitive reminders on supported Android versions</small></div><button class="setting-action" onclick="requestAssistant('alarms')">OPEN</button></div>
+</div>
+<div class="setting-group"><h3>App behavior</h3>
+<div class="setting-card"><div><strong>Voice responses</strong><small>Speak MARK’s replies aloud</small></div><input class="setting-toggle" id="voiceResponses" type="checkbox" onchange="setNativeToggle('voiceResponses',this.checked)"></div>
+<div class="setting-card"><div><strong>Sound effects</strong><small>Play interface feedback sounds</small></div><input class="setting-toggle" id="soundEffects" type="checkbox" onchange="setNativeToggle('soundEffects',this.checked)"></div>
+<div class="setting-card"><div><strong>Particle effects</strong><small>Show the blue neutron-star surface animation</small></div><input class="setting-toggle" id="particleEffects" type="checkbox" onchange="setNativeToggle('particleEffects',this.checked)"></div>
+<div class="setting-card"><div><strong>Auto listening</strong><small>Start voice mode when MARK opens</small></div><input class="setting-toggle" id="autoListening" type="checkbox" onchange="setNativeToggle('autoListening',this.checked)"></div>
+<div class="setting-card"><div><strong>Shake wake</strong><small>Use the user-enabled motion sensor wake service</small></div><input class="setting-toggle" id="gestureWake" type="checkbox" onchange="setNativeToggle('gestureWake',this.checked)"></div>
+<div class="setting-card"><div><strong>Wake word</strong><small>Listen locally for the “Mark” wake word</small></div><input class="setting-toggle" id="wakeWord" type="checkbox" onchange="setNativeToggle('wakeWord',this.checked)"></div>
+<div class="setting-card"><div><strong>Autopilot mode</strong><small>Run safe, reversible actions automatically; MARK still stops for destructive, financial, communication, installation, and security-sensitive actions</small></div><input class="setting-toggle" id="autopilot" type="checkbox" onchange="setNativeToggle('autopilot',this.checked)"></div>
+<div class="setting-card"><div><strong>AI provider</strong><small>Live voice and assistant responses</small></div><span class="setting-select">Gemini</span></div>
+<div class="setting-card"><div><strong>Voice language</strong><small>Speech recognition locale</small></div><span class="setting-select">English (India)</span></div>
+</div></div></section>
+<section class="panel" id="history"><div class="panelhead"><h2>HISTORY</h2><button class="close" onclick="closePanels()">×</button></div><div id="historyList" class="messages"><p style="color:#777;text-align:center;margin-top:40px">Your conversations will appear here.</p></div></section>
+<section class="panel" id="chat"><div class="panelhead"><h2>MARK CHAT</h2><button class="close" onclick="closePanels()">×</button></div><div class="messages" id="messages"><div class="msg bot">Hello. I am MARK. Touch my core or send me a message.</div></div><div class="composer"><input id="chatInput" placeholder="Message MARK..." onkeydown="if(event.key==='Enter')sendChat()"><button onclick="sendChat()">↑</button></div></section>
+</div>
+<script>
+const canvas=document.getElementById('sphere'),ctx=canvas.getContext('2d'),visual=document.getElementById('visual');
+let W=0,H=0,dpr=1,particles=[],rotationY=0,rotationX=0,mode='idle',pointer=null,dragging=false,lastX=0,lastY=0,holdTimer=null,held=false,pressTime=0,tapPulseTime=0;
+const TAU=Math.PI*2;
+function resize(){const r=canvas.getBoundingClientRect();dpr=Math.min(devicePixelRatio||1,2);W=r.width;H=r.height;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);makeParticles()}
+function makeParticles(){
+ particles=[];
+ // Fewer points create clearly visible spacing between the glowing blue surface dots.
+ const n=390;
+ for(let i=0;i<n;i++){
+  const y=1-2*(i+.5)/n;
+  const a=Math.PI*(3-Math.sqrt(5))*i;
+  const rr=Math.sqrt(1-y*y);
+  particles.push({
+   x:Math.cos(a)*rr,
+   y,
+   z:Math.sin(a)*rr,
+   size:.72+Math.random()*.62,
+   phase:Math.random()*TAU
+  });
+ }
+}
+function animate(){
+ requestAnimationFrame(animate);
+ ctx.clearRect(0,0,W,H);
+ const now=performance.now();
+ // No orbiting emitters or free-floating particles: every dot belongs to the sphere surface.
+ const speaking=mode==='speaking',listening=mode==='listening';
+ const pulse=speaking?1.09+Math.sin(now*.006)*.075:
+             listening?1.035+Math.sin(now*.004)*.018:
+             1+Math.sin(now*.0013)*.012;
+ const holdScale=held?1.14:1;
+ const tapAge=(now-tapPulseTime)/650;
+ const tapScale=tapPulseTime?1+Math.max(0,1-tapAge)*.09*Math.sin(Math.max(0,1-tapAge)*Math.PI):1;
+ const R=Math.min(W,H)*.32*pulse*holdScale*tapScale;
+ const cx=W/2,cy=H/2;
+
+ // Removed the inner blue atmospheric glow; only the blue surface dots remain.
+
+ const pts=particles.map(p=>{
+  const x=p.x*Math.cos(rotationY)-p.z*Math.sin(rotationY);
+  const z=p.x*Math.sin(rotationY)+p.z*Math.cos(rotationY);
+  const yy=p.y*Math.cos(rotationX)-z*Math.sin(rotationX);
+  const zz=p.y*Math.sin(rotationX)+z*Math.cos(rotationX);
+  const breathe=speaking?Math.sin(now*.008+p.phase)*.012:0;
+  const scale=R*(1+breathe);
+  return{x:cx+x*scale,y:cy+yy*scale,z:zz,size:p.size};
+ }).sort((a,b)=>a.z-b.z);
+
+ for(const p of pts){
+  const depth=(p.z+1)/2;
+  const alpha=.38+depth*.58;
+  const radius=p.size*(.72+depth*.42)*(held?1.08:1);
+  ctx.beginPath();
+  ctx.arc(p.x,p.y,radius,0,TAU);
+  ctx.fillStyle=`rgba(65,175,255,${alpha})`;
+  ctx.shadowBlur=depth>.25?7+depth*11:3;
+  ctx.shadowColor='#168fff';
+  ctx.fill();
+ }
+ ctx.shadowBlur=0;
+}
+visual.addEventListener('pointerdown',e=>{e.preventDefault();visual.setPointerCapture(e.pointerId);dragging=true;lastX=e.clientX;lastY=e.clientY;pressTime=performance.now();held=false;holdTimer=setTimeout(()=>{if(dragging){held=true;}} ,450);pointer=null});
+visual.addEventListener('pointermove',e=>{if(!dragging)return;const dx=e.clientX-lastX,dy=e.clientY-lastY;if(Math.abs(dx)+Math.abs(dy)>2){clearTimeout(holdTimer);if(Math.abs(dx)+Math.abs(dy)>5)pointer=null;rotationY+=dx*.009;rotationX=Math.max(-1.2,Math.min(1.2,rotationX+dy*.009));lastX=e.clientX;lastY=e.clientY}});
+function endPointer(e){if(!dragging)return;clearTimeout(holdTimer);const duration=performance.now()-pressTime;dragging=false;if(held){held=false;}else if(duration<350){tapPulseTime=performance.now();}}
+visual.addEventListener('pointerup',endPointer);visual.addEventListener('pointercancel',endPointer);
+window.addEventListener('resize',resize);resize();animate();
+
+function setMode(m){mode=m;document.getElementById('status').textContent=m==='speaking'?'MARK SPEAKING':m==='listening'?'LISTENING':m==='thinking'?'PROCESSING':'SYSTEM ONLINE';document.getElementById('hint').innerHTML=m==='speaking'?'<strong>MARK IS SPEAKING</strong>':m==='listening'?'<strong>LISTENING TO YOU</strong>':m==='thinking'?'<strong>PROCESSING REQUEST</strong>':'TOUCH THE CORE TO INTERACT';document.getElementById('mic').classList.toggle('active',m==='listening')}
+let recognition=null;
+function toggleVoice(){if(window.AndroidJarvis?.startVoice){AndroidJarvis.startVoice();return}if(mode==='listening'){recognition?.stop();setMode('idle');return}const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Speech){alert('Speech recognition unavailable. Try Chrome or connect the Android voice bridge.');return}recognition=new Speech();recognition.lang='en-IN';recognition.onstart=()=>setMode('listening');recognition.onresult=e=>{document.getElementById('message').value=e.results[0][0].transcript;sendMessage()};recognition.onend=()=>{if(mode==='listening')setMode('idle')};recognition.onerror=()=>setMode('idle');recognition.start()}
+	function openPanel(id){const panel=document.getElementById(id);if(!panel)return;document.querySelectorAll('.panel').forEach(p=>{p.classList.remove('show');p.style.display='none'});panel.classList.add('show');panel.style.display='flex';panel.style.visibility='visible';panel.style.opacity='1';if(id==='settings')applyNativeSettings()}function closePanels(){document.querySelectorAll('.panel').forEach(p=>{p.classList.remove('show');p.style.display='none'})}
+	function setNativeToggle(id,enabled){const bridge=window.AndroidJarvis;if(!bridge)return;const methods={voiceResponses:'setVoiceResponses',soundEffects:'setSoundEffects',particleEffects:'setParticleEffects',autoListening:'setAutoListening',gestureWake:'setGestureWake',wakeWord:'setWakeWord',autopilot:'setAutopilot'};const method=methods[id];if(method&&bridge[method])bridge[method](!!enabled)}
+	function requestCore(key){if(window.AndroidJarvis?.requestCorePermission)AndroidJarvis.requestCorePermission(key);else showToast('ANDROID SETTINGS ARE AVAILABLE IN THE MARK APP')}
+	function requestAssistant(key){if(window.AndroidJarvis?.requestAssistantPermission)AndroidJarvis.requestAssistantPermission(key);else showToast('ANDROID SETTINGS ARE AVAILABLE IN THE MARK APP')}
+	function setAccessCard(id,enabled,action){const card=document.getElementById('access-'+id);if(!card)return;const button=card.querySelector('.setting-action');card.classList.toggle('enabled',!!enabled);button.textContent=enabled?'ENABLED':action||'OPEN';button.classList.toggle('enabled',!!enabled)}
+	function setPermissionCard(key,enabled){const card=document.querySelector('[data-permission="'+key+'"]');if(!card)return;const button=card.querySelector('.setting-action');card.classList.toggle('enabled',!!enabled);button.textContent=enabled?'ENABLED':(key==='notifications'||key==='alarms'?'OPEN':'CHECK');button.classList.toggle('enabled',!!enabled)}
+	function applyNativeSettings(){const bridge=window.AndroidJarvis;if(!bridge?.getUiState)return;try{const state=JSON.parse(bridge.getUiState()),core=state.corePermissions||{},assistant=state.assistantPermissions||{};['microphone','camera','notifications','accessibility','storage','defaultAssistant'].forEach(k=>setAccessCard(k,!!core[k],k==='microphone'||k==='camera'||k==='notifications'?'CHECK':'OPEN'));Object.keys(assistant).forEach(k=>setPermissionCard(k,!!assistant[k]));[['voiceResponses','voiceResponses'],['soundEffects','soundEffects'],['particleEffects','particleEffects'],['autoListening','autoListening'],['gestureWake','gestureWake'],['wakeWord','wakeWord'],['autopilot','autopilot']].forEach(([id,key])=>{const el=document.getElementById(id);if(el)el.checked=!!state[key]})}catch(e){}}
+	function updateAssistantPermissionState(){applyNativeSettings()}
+	function updateDefaultAssistantLabel(){applyNativeSettings()}
+	function showToast(text){const old=document.getElementById('markToast');if(old)old.remove();const toast=document.createElement('div');toast.id='markToast';toast.textContent=text;toast.style='position:absolute;left:18px;right:18px;bottom:92px;padding:12px 14px;border:1px solid #2b6f9c;border-radius:12px;background:#0b1b29;color:#a9dcff;text-align:center;font-size:11px;letter-spacing:.5px;z-index:20';document.querySelector('.app').appendChild(toast);setTimeout(()=>toast.remove(),2600)}
+function sendMessage(){const i=document.getElementById('message'),v=i.value.trim();if(!v)return;i.value='';addChat(v);openPanel('chat')}
+function sendChat(){const i=document.getElementById('chatInput'),v=i.value.trim();if(!v)return;i.value='';addChat(v)}
+function addChat(v){const m=document.getElementById('messages'),u=document.createElement('div');u.className='msg user';u.textContent=v;m.appendChild(u);m.scrollTop=m.scrollHeight;const h=document.getElementById('historyList');if(h.querySelector('p'))h.innerHTML='';const item=document.createElement('div');item.className='historyitem';item.textContent=v;h.prepend(item);if(window.AndroidJarvis?.sendMessage){setMode('thinking');AndroidJarvis.sendMessage(v)}else{const b=document.createElement('div');b.className='msg bot';b.textContent='Interface demo: connect your MARK AI backend to process this request.';m.appendChild(b);m.scrollTop=m.scrollHeight}}
+function jarvisSpeak(text){const m=document.getElementById('messages'),b=document.createElement('div');b.className='msg bot';b.textContent=text;m.appendChild(b);m.scrollTop=m.scrollHeight;setMode('speaking')}
+</script>
+</body>
+</html>

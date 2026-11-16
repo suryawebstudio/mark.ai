@@ -1,0 +1,129 @@
+{
+  "packageName": "com.google.android.apps.maps",
+  "appName": "Google Maps",
+  "versionCode": 110000000,
+  "versionName": "11.0.0",
+  "launcherActivity": "com.google.android.maps.MapsActivity",
+  "mainActivities": ["com.google.android.maps.MapsActivity"],
+  "accessibilityLevel": "PARTIAL",
+  "keyElements": {
+    "search_box": {
+      "role": "View",
+      "resourceIds": ["com.google.android.apps.maps:id/search_omnibox_text_box"],
+      "descriptionPatterns": ["Search"],
+      "actionTypes": ["click"]
+    },
+    "search_edit_text": {
+      "role": "EditText",
+      "resourceIds": ["com.google.android.apps.maps:id/search_omnibox_edit_text"],
+      "textPatterns": ["Search"],
+      "actionTypes": ["type"]
+    },
+    "directions_button": {
+      "role": "Button",
+      "resourceIds": ["com.google.android.apps.maps:id/placepage_directions_button"],
+      "descriptionPatterns": ["Directions"],
+      "actionTypes": ["click"]
+    },
+    "start_button": {
+      "role": "Button",
+      "resourceIds": ["com.google.android.apps.maps:id/start_button"],
+      "descriptionPatterns": ["Start"],
+      "actionTypes": ["click"]
+    },
+    "close_navigation_button": {
+      "role": "Button",
+      "descriptionPatterns": ["Close navigation"],
+      "actionTypes": ["click"]
+    },
+    "my_location_button": {
+      "role": "Button",
+      "resourceIds": ["com.google.android.apps.maps:id/mylocation_button"],
+      "descriptionPatterns": ["My location"],
+      "actionTypes": ["click"]
+    },
+    "layers_fab": {
+      "role": "Button",
+      "resourceIds": ["com.google.android.apps.maps:id/layers_fab"],
+      "descriptionPatterns": ["Layers"],
+      "actionTypes": ["click"]
+    },
+    "map_container": {
+      "role": "View",
+      "resourceIds": ["com.google.android.apps.maps:id/fullscreens_group"],
+      "actionTypes": ["swipe", "drag", "pinch"]
+    }
+  },
+  "navigationPatterns": {
+    "map_to_search": {
+      "fromScreen": "map",
+      "toScreen": "search",
+      "action": { "type": "tap", "params": { "targetRole": "search_box" } },
+      "verification": { "type": "element_present", "params": { "targetRole": "search_edit_text" } }
+    },
+    "place_to_directions": {
+      "fromScreen": "place_page",
+      "toScreen": "directions",
+      "action": { "type": "tap", "params": { "targetRole": "directions_button" } },
+      "verification": { "type": "element_present", "params": { "targetRole": "start_button" } }
+    },
+    "directions_to_navigation": {
+      "fromScreen": "directions",
+      "toScreen": "navigation",
+      "action": { "type": "tap", "params": { "targetRole": "start_button", "confirmed": "true" } },
+      "verification": { "type": "element_present", "params": { "targetRole": "close_navigation_button" } }
+    }
+  },
+  "workflows": {
+    "search_place": {
+      "name": "search_place",
+      "description": "Search for a place on the map",
+      "triggers": ["search", "find", "place", "maps"],
+      "startScreen": "map",
+      "steps": [
+        { "action": "tap", "targetRole": "search_box", "verification": { "type": "element_present", "params": { "targetRole": "search_edit_text" } } },
+        { "action": "type", "targetRole": "search_edit_text", "params": { "text": "{{query}}" }, "verification": { "type": "element_present", "params": { "targetRole": "first_result" } } },
+        { "action": "tap", "targetRole": "first_result", "verification": { "type": "element_present", "params": { "targetRole": "directions_button" } } }
+      ]
+    },
+    "get_directions": {
+      "name": "get_directions",
+      "description": "Get directions to a place",
+      "triggers": ["direction", "navigate", "route", "maps"],
+      "startScreen": "place_page",
+      "steps": [
+        { "action": "tap", "targetRole": "directions_button", "verification": { "type": "element_present", "params": { "targetRole": "start_button" } } }
+      ]
+    },
+    "start_navigation": {
+      "name": "start_navigation",
+      "description": "Start turn-by-turn navigation",
+      "triggers": ["start", "navigate", "drive", "directions"],
+      "startScreen": "directions",
+      "steps": [
+        { "action": "tap", "targetRole": "start_button", "params": { "confirmed": "true" }, "verification": { "type": "element_present", "params": { "targetRole": "close_navigation_button" } }, "requiresConfirmation": true }
+      ],
+      "requiresConfirmation": true
+    },
+    "stop_navigation": {
+      "name": "stop_navigation",
+      "description": "Stop active navigation",
+      "triggers": ["stop", "end", "navigation"],
+      "startScreen": "navigation",
+      "steps": [
+        { "action": "tap", "targetRole": "close_navigation_button", "verification": { "type": "screen_change", "params": {} } }
+      ]
+    }
+  },
+  "commonDialogs": [
+    { "trigger": "terms_of_service", "textPatterns": ["Terms", "Service", "Accept"], "action": "confirm" },
+    { "trigger": "location_permission", "textPatterns": ["Location", "permission", "Allow"], "action": "user_guidance" },
+    { "trigger": "beta_dialog", "textPatterns": ["Beta", "try", "new"], "action": "dismiss" }
+  ],
+  "intents": {
+    "navigate": "google.navigation:q={{destination}}&mode={{mode}}&avoid={{avoid}}",
+    "search": "geo:0,0?q={{query}}",
+    "streetview": "google.streetview:cbll={{lat}},{{lng}}"
+  },
+  "deepLinks": {}
+}

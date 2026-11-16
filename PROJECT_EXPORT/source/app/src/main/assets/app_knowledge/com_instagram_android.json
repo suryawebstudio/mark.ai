@@ -1,0 +1,162 @@
+{
+  "packageName": "com.instagram.android",
+  "appName": "Instagram",
+  "versionCode": 240000000,
+  "versionName": "240.0.0.0",
+  "launcherActivity": "com.instagram.mainactivity.LauncherActivity",
+  "mainActivities": ["com.instagram.mainactivity.LauncherActivity", "com.instagram.mainactivity.MainTabActivity"],
+  "accessibilityLevel": "MINIMAL",
+  "keyElements": {
+    "home_tab": {
+      "role": "Tab",
+      "resourceIds": ["com.instagram.android:id/tab_icon"],
+      "descriptionPatterns": ["Home"],
+      "actionTypes": ["click"],
+      "parentContext": "bottom_navigation"
+    },
+    "search_tab": {
+      "role": "Tab",
+      "resourceIds": ["com.instagram.android:id/tab_icon"],
+      "descriptionPatterns": ["Search", "Explore"],
+      "actionTypes": ["click"],
+      "parentContext": "bottom_navigation"
+    },
+    "reels_tab": {
+      "role": "Tab",
+      "resourceIds": ["com.instagram.android:id/tab_icon"],
+      "descriptionPatterns": ["Reels"],
+      "actionTypes": ["click"],
+      "parentContext": "bottom_navigation"
+    },
+    "shop_tab": {
+      "role": "Tab",
+      "resourceIds": ["com.instagram.android:id/tab_icon"],
+      "descriptionPatterns": ["Shop"],
+      "actionTypes": ["click"],
+      "parentContext": "bottom_navigation"
+    },
+    "profile_tab": {
+      "role": "Tab",
+      "resourceIds": ["com.instagram.android:id/tab_icon"],
+      "descriptionPatterns": ["Profile"],
+      "actionTypes": ["click"],
+      "parentContext": "bottom_navigation"
+    },
+    "feed_list": {
+      "role": "ListView",
+      "resourceIds": ["com.instagram.android:id/layout_listview_parent_container"],
+      "actionTypes": ["scroll"]
+    },
+    "search_button": {
+      "role": "Button",
+      "resourceIds": ["com.instagram.android:id/action_bar_search"],
+      "descriptionPatterns": ["Search"],
+      "actionTypes": ["click"]
+    },
+    "search_field": {
+      "role": "EditText",
+      "resourceIds": ["com.instagram.android:id/search_src_text"],
+      "textPatterns": ["Search"],
+      "actionTypes": ["type"]
+    },
+    "dm_icon": {
+      "role": "Button",
+      "resourceIds": ["com.instagram.android:id/direct_inbox"],
+      "descriptionPatterns": ["Direct", "Messages"],
+      "actionTypes": ["click"]
+    },
+    "new_message_fab": {
+      "role": "Button",
+      "resourceIds": ["com.instagram.android:id/fab"],
+      "descriptionPatterns": ["New message"],
+      "actionTypes": ["click"]
+    },
+    "like_button": {
+      "role": "Button",
+      "resourceIds": ["com.instagram.android:id/row_feed_button_like"],
+      "descriptionPatterns": ["Like"],
+      "actionTypes": ["click"]
+    },
+    "comment_button": {
+      "role": "Button",
+      "resourceIds": ["com.instagram.android:id/row_feed_button_comment"],
+      "descriptionPatterns": ["Comment"],
+      "actionTypes": ["click"]
+    },
+    "share_button": {
+      "role": "Button",
+      "resourceIds": ["com.instagram.android:id/row_feed_button_share"],
+      "descriptionPatterns": ["Share"],
+      "actionTypes": ["click"]
+    },
+    "save_button": {
+      "role": "Button",
+      "resourceIds": ["com.instagram.android:id/row_feed_button_save"],
+      "descriptionPatterns": ["Save"],
+      "actionTypes": ["click"]
+    },
+    "comment_input": {
+      "role": "EditText",
+      "resourceIds": ["com.instagram.android:id/comment_text"],
+      "textPatterns": ["Add a comment"],
+      "actionTypes": ["type"]
+    },
+    "comment_post_button": {
+      "role": "Button",
+      "resourceIds": ["com.instagram.android:id/post_button"],
+      "descriptionPatterns": ["Post"],
+      "actionTypes": ["click"]
+    }
+  },
+  "navigationPatterns": {},
+  "workflows": {
+    "open_profile": {
+      "name": "open_profile",
+      "description": "Open a user's profile",
+      "triggers": ["profile", "user", "instagram", "account"],
+      "startScreen": "feed",
+      "steps": [
+        { "action": "tap", "targetRole": "search_tab", "verification": { "type": "element_present", "params": { "targetRole": "search_field" } } },
+        { "action": "type", "targetRole": "search_field", "params": { "text": "{{username}}" }, "verification": { "type": "element_present", "params": { "targetRole": "search_results" } } },
+        { "action": "tap", "targetRole": "search_result_user", "params": { "matchText": "{{username}}" }, "verification": { "type": "element_present", "params": { "targetRole": "profile_header" } } }
+      ]
+    },
+    "like_post": {
+      "name": "like_post",
+      "description": "Like a post in the feed",
+      "triggers": ["like", "heart", "instagram"],
+      "startScreen": "feed",
+      "steps": [
+        { "action": "tap", "targetRole": "like_button", "verification": { "type": "state_changed", "params": { "targetRole": "like_button", "expectedState": "checked" } } }
+      ]
+    },
+    "send_dm": {
+      "name": "send_dm",
+      "description": "Send a direct message",
+      "triggers": ["message", "dm", "direct", "instagram"],
+      "startScreen": "feed",
+      "steps": [
+        { "action": "tap", "targetRole": "dm_icon", "verification": { "type": "element_present", "params": { "targetRole": "direct_inbox" } } },
+        { "action": "tap", "targetRole": "new_message_fab", "verification": { "type": "element_present", "params": { "targetRole": "recipient_search" } } },
+        { "action": "type", "targetRole": "recipient_search", "params": { "text": "{{username}}" }, "verification": { "type": "element_present", "params": { "targetRole": "recipient_result" } } },
+        { "action": "tap", "targetRole": "recipient_result", "params": { "matchText": "{{username}}" }, "verification": { "type": "element_present", "params": { "targetRole": "comment_input" } } },
+        { "action": "type", "targetRole": "comment_input", "params": { "text": "{{message}}" }, "verification": { "type": "text_contains", "params": { "expectedText": "{{message}}" } } },
+        { "action": "tap", "targetRole": "comment_post_button", "params": { "confirmed": "true" }, "verification": { "type": "element_present", "params": { "targetRole": "message_list" } }, "requiresConfirmation": true }
+      ],
+      "requiresConfirmation": true
+    },
+    "watch_reels": {
+      "name": "watch_reels",
+      "description": "Watch Reels videos",
+      "triggers": ["reels", "video", "watch", "instagram"],
+      "startScreen": "feed",
+      "steps": [
+        { "action": "tap", "targetRole": "reels_tab", "verification": { "type": "screen_change", "params": {} } },
+        { "action": "swipe_up", "targetRole": "reels_player", "params": {}, "verification": { "type": "screen_change", "params": {} } }
+      ]
+    }
+  },
+  "commonDialogs": [],
+  "intents": {},
+  "deepLinks": {}
+}
