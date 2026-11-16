@@ -1,12 +1,23 @@
 package com.surya.jarvis
 
 import android.accessibilityservice.AccessibilityService
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
+import android.util.Base64
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.Locale
 import java.util.UUID
 
@@ -26,6 +37,12 @@ class JarvisAccessibilityService : AccessibilityService() {
         val nativeId: String?
     )
 
+    data class VisualCapture(
+        val jpegBase64: String,
+        val width: Int,
+        val height: Int
+    )
+
     companion object {
         @Volatile
         private var current: JarvisAccessibilityService? = null
@@ -34,6 +51,9 @@ class JarvisAccessibilityService : AccessibilityService() {
 
         fun inspectScreen(): String = current?.describeVisibleScreen()
             ?: errorMessage("Accessibility control is not enabled. Open Android Accessibility settings and enable MARK.")
+
+        fun captureVisualScreen(): Pair<Boolean, VisualCapture?> = current?.captureScreenWithGrid()
+            ?: (false to null)
 
         fun control(
             snapshotId: String,
@@ -193,6 +213,97 @@ class JarvisAccessibilityService : AccessibilityService() {
             .put("complete", !snapshotTruncated)
             .put("elements", elements)
             .toString()
+    }
+
+    /**
+     * Capture one current-screen image for apps whose UI is not exposed through
+     * accessibility. The image is deliberately separate from the semantic
+     * snapshot and is never captured continuously.
+     */
+    private fun captureScreenWithGrid(): Pair<Boolean, VisualCapture?> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return false to null
+        }
+
+        val executor = Executors.newSingleThreadExecutor()
+        val latch = CountDownLatch(1)
+        var result: VisualCapture? = null
+        try {
+            takeScreenshot(
+                Display.DEFAULT_DISPLAY,
+                executor,
+                object : TakeScreenshotCallback {
+                    override fun onSuccess(screenshot: ScreenshotResult) {
+                        try {
+                            val source = screenshot.hardwareBuffer
+                            val bitmap = Bitmap.wrapHardwareBuffer(source, screenshot.colorSpace)
+                                ?.copy(Bitmap.Config.ARGB_8888, true)
+                            source.close()
+                            if (bitmap != null) {
+                                drawGroundingGrid(bitmap)
+                                val output = ByteArrayOutputStream()
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 82, output)
+                                val width = bitmap.width
+                                val height = bitmap.height
+                                bitmap.recycle()
+                                result = VisualCapture(
+                                    Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP),
+                                    width,
+                                    height
+                                )
+                            }
+                        } catch (_: Exception) {
+                            result = null
+                        } finally {
+                            latch.countDown()
+                        }
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        latch.countDown()
+                    }
+                }
+            )
+            latch.await(3, TimeUnit.SECONDS)
+        } catch (_: Exception) {
+            return false to null
+        } finally {
+            executor.shutdownNow()
+        }
+        return (result != null) to result
+    }
+
+    private fun drawGroundingGrid(bitmap: Bitmap) {
+        val canvas = Canvas(bitmap)
+        val columns = 8
+        val rows = 12
+        val cellWidth = bitmap.width.toFloat() / columns
+        val cellHeight = bitmap.height.toFloat() / rows
+        val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(150, 255, 0, 255)
+            strokeWidth = 2f
+            style = Paint.Style.STROKE
+        }
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = (bitmap.width.coerceAtMost(bitmap.height) * 0.028f).coerceAtLeast(18f)
+            style = Paint.Style.FILL
+            setShadowLayer(4f, 1f, 1f, Color.BLACK)
+        }
+        for (column in 0..columns) {
+            val x = column * cellWidth
+            canvas.drawLine(x, 0f, x, bitmap.height.toFloat(), linePaint)
+        }
+        for (row in 0..rows) {
+            val y = row * cellHeight
+            canvas.drawLine(0f, y, bitmap.width.toFloat(), y, linePaint)
+        }
+        for (column in 0 until columns) {
+            canvas.drawText(('A'.code + column).toChar().toString(), column * cellWidth + 8f, textPaint.textSize + 8f, textPaint)
+        }
+        for (row in 0 until rows) {
+            canvas.drawText((row + 1).toString(), 8f, row * cellHeight + textPaint.textSize + 8f, textPaint)
+        }
     }
 
     private fun collectElements(

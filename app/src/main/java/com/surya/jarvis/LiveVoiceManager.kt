@@ -251,7 +251,7 @@ class LiveVoiceManager(
                                             "You are speaking directly with the user in a live voice conversation. " +
                                             "You may open an installed app or a listed Android Settings page only when the user directly asks. You may turn the flashlight on or off with set_flashlight when requested. You may capture one still image with capture_camera_image only when the user directly asks what the camera sees; never capture continuously or secretly. " +
                                             "Android protects many system settings. For Wi-Fi and Bluetooth, open the system control panel or Settings page first. If MARK Accessibility is enabled, inspect the visible panel and tap only the exact visible Wi-Fi or Bluetooth switch the user requested; otherwise tell the user Android requires them to tap the switch. Never claim a protected setting changed unless the tool response or a follow-up screen inspection confirms it. " +
-                                            "When MARK Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools; it does not grant hidden access to every phone setting. inspect_visible_screen returns a snapshot_id, a complete flag, and refs such as @a1abc123:e1. If complete is false, inspect again before choosing a target. For tap, type, and scroll, always pass the exact snapshot_id and ref from the latest inspection; never guess labels or reuse an old ref. MARK re-identifies refs from stable role/name/description evidence and rejects ambiguous matches, so if it reports a stale or ambiguous ref, inspect again and choose from the new snapshot. Back, Home, and overview do not need a ref. " +
+                                            "When MARK Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools; it does not grant hidden access to every phone setting. inspect_visible_screen returns a snapshot_id, a complete flag, and refs such as @a1abc123:e1. If complete is false, inspect again before choosing a target. For tap, type, and scroll, always pass the exact snapshot_id and ref from the latest inspection; never guess labels or reuse an old ref. MARK re-identifies refs from stable role/name/description evidence and rejects ambiguous matches, so if it reports a stale or ambiguous ref, inspect again and choose from the new snapshot. Back, Home, and overview do not need a ref. Accessibility is always the primary path. If the tree is incomplete or does not expose a requested visible control, use inspect_visual_screen once as a visual fallback; it sends one current screenshot with an 8-column by 12-row labeled grid to the vision session. Use the grid only to understand custom-drawn pixels, then prefer semantic refs whenever they become available. Never use visual fallback to bypass passwords, biometrics, CAPTCHAs, permission dialogs, or security screens. " +
                                             "For a multi-step request, first call start_task, then execute it as a task: inspect the screen before the first control action, perform one action at a time, inspect the screen again after every control action, then continue only when the result matches the intended step. Tool responses include status, verified, retryable, and task_state fields; success means the request was accepted, while verified=true means the outcome was confirmed. Never issue multiple phone-control function calls in one turn; wait for each function response before choosing the next action. Do not call complete_task until the requested outcome is verified. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
                                             "Use inspect_visible_screen before every target-dependent action. If MARK reports a stale or invalid ref, inspect again and retry with the new ref. Never claim an action succeeded unless its function response says it did. " +
                                             "For sending, deleting, purchasing, calling, sharing, posting, installing, or other consequential actions, ask the user for confirmation first and then repeat the blocked action with confirmed=true only after the user explicitly agrees. " +
@@ -443,6 +443,12 @@ class LiveVoiceManager(
             put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
         }
 
+        val inspectVisualScreen = JSONObject().apply {
+            put("name", "inspect_visual_screen")
+            put("description", "Capture one current screenshot of the visible phone screen and send it to the active vision session with an 8-column by 12-row grid. Use only when inspect_visible_screen is incomplete or cannot expose a visible custom-drawn control. This is not continuous capture and does not bypass Android security screens. Requires Android 11+ and enabled MARK Accessibility.")
+            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+        }
+
         val setFlashlight = JSONObject().apply {
             put("name", "set_flashlight")
             put("description", "Turn the phone flashlight on or off. This uses Android's flashlight API and requires the user to grant camera permission; no camera preview is opened.")
@@ -554,7 +560,7 @@ class LiveVoiceManager(
         return JSONArray().put(
             JSONObject().put(
                 "functionDeclarations",
-                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(captureCameraImage).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask).put(completeTask).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
+                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(captureCameraImage).put(inspectScreen).put(inspectVisualScreen).put(controlScreen).put(startTask).put(cancelTask).put(completeTask).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
             )
         )
     }
@@ -638,6 +644,12 @@ class LiveVoiceManager(
                 verified = true,
                 taskState = taskState
             ).withData(snapshot)
+        }
+
+        if (name == "inspect_visual_screen") {
+            taskState = TaskState.OBSERVING
+            val outcome = executePhoneTool(name, args)
+            return resultFromPair(outcome, taskState, verified = outcome.first)
         }
 
         if (!isTaskAction(name)) {
@@ -744,6 +756,7 @@ class LiveVoiceManager(
                 "open_settings_page" -> openSettingsPage(args.optString("page"))
                 "set_flashlight" -> setFlashlight(args.optBoolean("enabled", false))
                 "capture_camera_image" -> captureCameraImage()
+                "inspect_visual_screen" -> captureVisualScreen()
                 "list_files" -> fileManager.listFiles()
                 "create_text_file" -> fileManager.createTextFile(
                     args.optString("name"),
@@ -773,6 +786,41 @@ class LiveVoiceManager(
         } catch (_: Exception) {
             false to "Android could not open that app or Settings page."
         }
+    }
+
+    /** Capture one screenshot and deliver it to Gemini as a user vision turn. */
+    private fun captureVisualScreen(): Pair<Boolean, String> {
+        val socket = webSocket ?: return false to "The live MARK session is not connected."
+        if (!JarvisAccessibilityService.isEnabled()) {
+            return false to "Accessibility control is not enabled. Enable MARK in Android Accessibility settings first."
+        }
+        val (success, capture) = JarvisAccessibilityService.captureVisualScreen()
+        if (!success || capture == null) {
+            return false to if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                "Visual screen capture requires Android 11 or newer."
+            } else {
+                "Android denied or could not complete the one-shot screen capture. Try again after the visible screen settles."
+            }
+        }
+        val message = JSONObject().apply {
+            put("clientContent", JSONObject().apply {
+                put("turns", JSONArray().put(JSONObject().apply {
+                    put("role", "user")
+                    put("parts", JSONArray()
+                        .put(JSONObject().put("text", "Inspect this single current phone screenshot only as a visual fallback. It includes an 8-column by 12-row grid: columns A-H and rows 1-12. Describe visible custom-drawn controls and their approximate grid cells. Do not infer hidden, protected, or unreadable content, and do not claim that an action was performed."))
+                        .put(JSONObject().put("inlineData", JSONObject()
+                            .put("mimeType", "image/jpeg")
+                            .put("data", capture.jpegBase64)))
+                    )
+                }))
+                put("turnComplete", true)
+            })
+        }
+        if (!socket.send(message.toString())) {
+            return false to "The visual screenshot could not be sent to the live vision session."
+        }
+        status("VISUAL SCREEN SENT ${capture.width}x${capture.height}")
+        return true to "One visual screen inspection was sent to the live vision session with an 8 by 12 grounding grid."
     }
 
     private fun launchInstalledApp(requestedName: String): Pair<Boolean, String> {
