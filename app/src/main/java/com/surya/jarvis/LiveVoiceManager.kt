@@ -52,6 +52,39 @@ class LiveVoiceManager(
         val bytes: ByteArray
     )
 
+    private enum class TaskState {
+        IDLE,
+        OBSERVING,
+        READY_TO_ACT,
+        WAITING_FOR_CONFIRMATION,
+        EXECUTING,
+        VERIFYING,
+        COMPLETED,
+        FAILED,
+        CANCELLED,
+        ESCALATED
+    }
+
+    private data class ToolResult(
+        val status: String,
+        val message: String,
+        val verified: Boolean = false,
+        val retryable: Boolean = false,
+        val taskState: TaskState,
+        val data: JSONObject? = null
+    ) {
+        fun withData(value: JSONObject?): ToolResult = copy(data = value)
+
+        fun toJson(): JSONObject = JSONObject()
+            .put("success", status == "success")
+            .put("status", status)
+            .put("verified", verified)
+            .put("retryable", retryable)
+            .put("task_state", taskState.name.lowercase(Locale.ROOT))
+            .put("message", message)
+            .apply { if (data != null) put("data", data) }
+    }
+
     companion object {
         private const val WORKER_URL =
             "https://jarvis-ai-backend.suryawebstudio.workers.dev"
@@ -87,6 +120,7 @@ class LiveVoiceManager(
     private var taskActive = false
     private var taskStepCount = 0
     private var awaitingTaskConfirmation = false
+    private var taskState = TaskState.IDLE
 
     private val fileManager = JarvisFileManager(context.applicationContext)
     private val memoryStore = JarvisMemoryStore(context.applicationContext)
@@ -218,7 +252,7 @@ class LiveVoiceManager(
                                             "You may open an installed app or a listed Android Settings page only when the user directly asks. You may turn the flashlight on or off with set_flashlight when requested. You may capture one still image with capture_camera_image only when the user directly asks what the camera sees; never capture continuously or secretly. " +
                                             "Android protects many system settings. For Wi-Fi and Bluetooth, open the system control panel or Settings page first. If MARK Accessibility is enabled, inspect the visible panel and tap only the exact visible Wi-Fi or Bluetooth switch the user requested; otherwise tell the user Android requires them to tap the switch. Never claim a protected setting changed unless the tool response or a follow-up screen inspection confirms it. " +
                                             "When MARK Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools; it does not grant hidden access to every phone setting. inspect_visible_screen returns a snapshot_id, a complete flag, and refs such as @a1abc123:e1. If complete is false, inspect again before choosing a target. For tap, type, and scroll, always pass the exact snapshot_id and ref from the latest inspection; never guess labels or reuse an old ref. MARK re-identifies refs from stable role/name/description evidence and rejects ambiguous matches, so if it reports a stale or ambiguous ref, inspect again and choose from the new snapshot. Back, Home, and overview do not need a ref. " +
-                                            "For a multi-step request, first call start_task, then execute it as a task: inspect the screen before the first control action, perform one action at a time, inspect the screen again after every control action, then continue only when the result matches the intended step. Never issue multiple phone-control function calls in one turn; wait for each function response before choosing the next action. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
+                                            "For a multi-step request, first call start_task, then execute it as a task: inspect the screen before the first control action, perform one action at a time, inspect the screen again after every control action, then continue only when the result matches the intended step. Tool responses include status, verified, retryable, and task_state fields; success means the request was accepted, while verified=true means the outcome was confirmed. Never issue multiple phone-control function calls in one turn; wait for each function response before choosing the next action. Do not call complete_task until the requested outcome is verified. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
                                             "Use inspect_visible_screen before every target-dependent action. If MARK reports a stale or invalid ref, inspect again and retry with the new ref. Never claim an action succeeded unless its function response says it did. " +
                                             "For sending, deleting, purchasing, calling, sharing, posting, installing, or other consequential actions, ask the user for confirmation first and then repeat the blocked action with confirmed=true only after the user explicitly agrees. " +
                                             "For file work, MARK uses Android's full shared-storage access only. If it is not enabled, tell the user to enable Full storage access from the MARK Settings panel and Android's permission screen; do not ask the user to select a folder. Use simple file names and do not invent paths. Before delete_file, say exactly which file or folder will be permanently deleted and wait for an explicit yes, then call delete_file with confirmed=true. " +
@@ -404,7 +438,7 @@ class LiveVoiceManager(
             put("name", "inspect_visible_screen")
             put(
                 "description",
-                "Read the accessible tree, labels, states, and actions currently visible on the foreground screen. The response includes snapshot_id, complete, and refs for actionable elements. Use this before interacting when the target is unclear."
+                "Read the accessible tree, labels, states, and actions currently visible on the foreground screen. The response includes snapshot_id, complete, and refs for actionable elements. The tool envelope also reports status, verified, retryable, and task_state. Use this before interacting when the target is unclear."
             )
             put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
         }
@@ -463,6 +497,12 @@ class LiveVoiceManager(
             put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
         }
 
+        val completeTask = JSONObject().apply {
+            put("name", "complete_task")
+            put("description", "Mark the current task complete only after the requested outcome has been verified. Do not use this after an unverified or failed action.")
+            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+        }
+
         val startTask = JSONObject().apply {
             put("name", "start_task")
             put("description", "Start or reset a new multi-step MARK task before executing a complex user request.")
@@ -514,7 +554,7 @@ class LiveVoiceManager(
         return JSONArray().put(
             JSONObject().put(
                 "functionDeclarations",
-                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(captureCameraImage).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
+                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(captureCameraImage).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask).put(completeTask).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
             )
         )
     }
@@ -539,12 +579,7 @@ class LiveVoiceManager(
             val functionResponse = JSONObject().apply {
                 if (id.isNotBlank()) put("id", id)
                 put("name", name)
-                put(
-                    "response",
-                    JSONObject()
-                        .put("success", outcome.first)
-                        .put("message", outcome.second)
-                )
+                put("response", outcome.toJson())
             }
             functionResponses.put(functionResponse)
 
@@ -560,52 +595,86 @@ class LiveVoiceManager(
         }
     }
 
-    private fun executeTaskTool(name: String, args: JSONObject): Pair<Boolean, String> {
+    private fun executeTaskTool(name: String, args: JSONObject): ToolResult {
         if (name == "start_task") {
             clearTaskState()
             taskActive = true
+            taskState = TaskState.READY_TO_ACT
             status("TASK STARTED")
-            return true to "A new multi-step task has started."
+            return ToolResult("success", "A new multi-step task has started.", taskState = taskState)
         }
 
         if (name == "cancel_task") {
             clearTaskState()
+            taskState = TaskState.CANCELLED
             status("TASK CANCELLED")
-            return true to "The current MARK task was cancelled."
+            return ToolResult("cancelled", "The current MARK task was cancelled.", taskState = taskState)
+        }
+
+        if (name == "complete_task") {
+            if (!taskActive || taskState !in setOf(TaskState.READY_TO_ACT, TaskState.VERIFYING)) {
+                return ToolResult("failed", "The task cannot be completed before its requested outcome is verified.", taskState = taskState)
+            }
+            taskActive = false
+            awaitingTaskConfirmation = false
+            taskState = TaskState.COMPLETED
+            status("TASK COMPLETED")
+            return ToolResult("success", "The requested task outcome was verified and the task is complete.", verified = true, taskState = taskState)
         }
 
         if (name == "inspect_visible_screen") {
-            return executePhoneTool(name, args)
+            taskState = TaskState.OBSERVING
+            val outcome = executePhoneTool(name, args)
+            if (!outcome.first) {
+                taskState = TaskState.FAILED
+                return resultFromPair(outcome, taskState)
+            }
+            val snapshot = runCatching { JSONObject(outcome.second) }.getOrNull()
+            val complete = snapshot?.optBoolean("complete", true) ?: false
+            taskState = if (complete) TaskState.READY_TO_ACT else TaskState.OBSERVING
+            return ToolResult(
+                status = "success",
+                message = "Screen inspection completed.",
+                verified = true,
+                taskState = taskState
+            ).withData(snapshot)
         }
 
         if (!isTaskAction(name)) {
-            return executePhoneTool(name, args)
+            return resultFromPair(executePhoneTool(name, args), taskState)
         }
 
         if (!taskActive) {
             taskStepCount = 0
             awaitingTaskConfirmation = false
             taskActive = true
+            taskState = TaskState.READY_TO_ACT
+        }
+        if (taskState in setOf(TaskState.CANCELLED, TaskState.COMPLETED, TaskState.FAILED)) {
+            return ToolResult("failed", "The task is ${taskState.name.lowercase(Locale.ROOT)}. Start a new task before using phone controls.", taskState = taskState)
         }
         if (taskStepCount >= MAX_TASK_STEPS) {
             clearTaskState()
+            taskState = TaskState.FAILED
             status("TASK STOPPED — TOO MANY STEPS")
-            return false to "The task was stopped after $MAX_TASK_STEPS steps to prevent an automation loop."
+            return ToolResult("failed", "The task was stopped after $MAX_TASK_STEPS steps to prevent an automation loop.", taskState = taskState)
         }
 
         val confirmed = args.optBoolean("confirmed", false)
         if (confirmed && !awaitingTaskConfirmation) {
-            return false to "Confirmation was not requested for a pending sensitive action. Ask the user before retrying."
+            return ToolResult("failed", "Confirmation was not requested for a pending sensitive action. Ask the user before retrying.", taskState = taskState)
         }
 
         if (isPotentiallySensitive(name, args) && !confirmed) {
             taskStepCount += 1
             awaitingTaskConfirmation = true
+            taskState = TaskState.WAITING_FOR_CONFIRMATION
             status("CONFIRMATION REQUIRED")
-            return false to "Confirmation required before this action. Ask the user to confirm, then repeat the same tool call with confirmed=true."
+            return ToolResult("confirmation_required", "Confirmation required before this action. Ask the user to confirm, then repeat the same tool call with confirmed=true.", taskState = taskState)
         }
 
         taskStepCount += 1
+        taskState = TaskState.EXECUTING
         status("TASK STEP $taskStepCount/$MAX_TASK_STEPS")
         val outcome = executePhoneTool(name, args)
 
@@ -613,10 +682,33 @@ class LiveVoiceManager(
             awaitingTaskConfirmation = false
         }
 
-        if (!outcome.first && !isPotentiallySensitive(name, args)) {
+        if (outcome.first) {
+            taskState = TaskState.VERIFYING
+        } else {
+            taskState = TaskState.FAILED
             status("TASK STEP FAILED")
         }
-        return outcome
+        return resultFromPair(outcome, taskState, verified = outcome.first && name != "control_visible_screen")
+    }
+
+    private fun resultFromPair(
+        outcome: Pair<Boolean, String>,
+        state: TaskState,
+        verified: Boolean = false
+    ): ToolResult = if (outcome.first) {
+        ToolResult("success", outcome.second, verified = verified, taskState = state)
+    } else {
+        val lower = outcome.second.lowercase(Locale.ROOT)
+        val status = when {
+            "permission" in lower || "accessibility" in lower -> "permission_required"
+            "stale" in lower -> "stale_ref"
+            "ambiguous" in lower -> "ambiguous_target"
+            "disabled" in lower -> "disabled_target"
+            "not found" in lower -> "not_found"
+            else -> "failed"
+        }
+        val retryable = lower.contains("timeout") || lower.contains("temporarily") || lower.contains("try again")
+        ToolResult(status, outcome.second, retryable = retryable, taskState = state)
     }
 
     private fun isTaskAction(name: String): Boolean =
@@ -642,6 +734,7 @@ class LiveVoiceManager(
         taskActive = false
         taskStepCount = 0
         awaitingTaskConfirmation = false
+        taskState = TaskState.IDLE
     }
 
     private fun executePhoneTool(name: String, args: JSONObject): Pair<Boolean, String> {
