@@ -2,18 +2,14 @@ package com.surya.jarvis.knowledge
 
 import android.content.Context
 import android.content.pm.PackageManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
 class AppKnowledgeManager(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true }
     private val cache = mutableMapOf<String, AppKnowledge>()
-    private val db = KnowledgeDatabase.getInstance(context)
 
-    suspend fun getKnowledge(packageName: String): AppKnowledge? {
-        return cache[packageName] ?: loadFromAssets(packageName) ?: loadFromDb(packageName)
+    fun getKnowledge(packageName: String): AppKnowledge? {
+        return cache[packageName] ?: loadFromAssets(packageName)
     }
 
     fun getKnowledgeSync(packageName: String): AppKnowledge? {
@@ -32,20 +28,8 @@ class AppKnowledgeManager(private val context: Context) {
         }
     }
 
-    private suspend fun loadFromDb(packageName: String): AppKnowledge? {
-        return try {
-            val entity = db.knowledgeDao().get(packageName)
-            entity?.toAppKnowledge()?.also { cache[packageName] = it }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    suspend fun updateKnowledge(knowledge: AppKnowledge) {
+    fun updateKnowledge(knowledge: AppKnowledge) {
         cache[knowledge.packageName] = knowledge
-        CoroutineScope(Dispatchers.IO).launch {
-            db.knowledgeDao().upsert(knowledge.toEntity())
-        }
     }
 
     fun detectVersionChange(packageName: String): Boolean {
@@ -58,14 +42,12 @@ class AppKnowledgeManager(private val context: Context) {
         return currentVersion != cachedVersion
     }
 
-    suspend fun migrateKnowledge(
+    fun migrateKnowledge(
         packageName: String,
         newVersionCode: Long,
         newVersionName: String
     ): AppKnowledge? {
         val old = getKnowledgeSync(packageName) ?: return null
-
-        // Auto-migrate key elements using fuzzy matching
         val migratedElements = old.keyElements.mapValues { (role, element) ->
             role to element.copy(
                 versionHistory = element.versionHistory + VersionSnapshot(
@@ -77,33 +59,19 @@ class AppKnowledgeManager(private val context: Context) {
                 )
             )
         }
-
         val migrated = old.copy(
             versionCode = newVersionCode,
             versionName = newVersionName,
             keyElements = migratedElements,
-            versionHistory = old.versionHistory + VersionSnapshot(
-                versionCode = newVersionCode,
-                versionName = newVersionName,
-                timestamp = System.currentTimeMillis(),
-                keyElementChanges = migratedElements.mapValues { (_, v) -> v.resourceIds },
-                uiChanges = listOf("Auto-migrated from version ${old.versionName}")
-            ),
             lastVerified = System.currentTimeMillis()
         )
-
         updateKnowledge(migrated)
         return migrated
     }
 
     fun isAppKnown(packageName: String): Boolean {
         return cache.containsKey(packageName) ||
-            context.assets.list("app_knowledge")?.any { it == "${packageName.replace(".", "_")}.json" } == true ||
-            try {
-                db.knowledgeDao().get(packageName) != null
-            } catch (e: Exception) {
-                false
-            }
+            context.assets.list("app_knowledge")?.any { it == "${packageName.replace(".", "_")}.json" } == true
     }
 
     fun isUserApp(packageName: String): Boolean {
