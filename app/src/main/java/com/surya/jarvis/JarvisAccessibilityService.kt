@@ -40,7 +40,8 @@ class JarvisAccessibilityService : AccessibilityService() {
     data class VisualCapture(
         val jpegBase64: String,
         val width: Int,
-        val height: Int
+        val height: Int,
+        val token: String
     )
 
     companion object {
@@ -62,7 +63,9 @@ class JarvisAccessibilityService : AccessibilityService() {
             target: String,
             text: String,
             direction: String,
-            confirmed: Boolean
+            confirmed: Boolean,
+            visualCell: String,
+            visualToken: String
         ): Pair<Boolean, String> = current?.performControl(
             snapshotId,
             ref,
@@ -70,7 +73,9 @@ class JarvisAccessibilityService : AccessibilityService() {
             target,
             text,
             direction,
-            confirmed
+            confirmed,
+            visualCell,
+            visualToken
         ) ?: (false to "Accessibility control is not enabled. Enable MARK in Android Accessibility settings first.")
 
         private fun errorMessage(message: String): String =
@@ -81,6 +86,12 @@ class JarvisAccessibilityService : AccessibilityService() {
     private var currentSnapshotId: String? = null
     private val refs = LinkedHashMap<String, RefEntry>()
     private var snapshotTruncated = false
+    private var visualToken: String? = null
+    private var visualTokenCreatedAt = 0L
+    private var visualWidth = 0
+    private var visualHeight = 0
+    private var visualGestureConsumed = false
+    private val visualGestureAreas = mutableSetOf<String>()
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -97,6 +108,8 @@ class JarvisAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         refs.clear()
         currentSnapshotId = null
+        visualToken = null
+        visualGestureAreas.clear()
         if (current === this) current = null
         super.onDestroy()
     }
@@ -108,7 +121,9 @@ class JarvisAccessibilityService : AccessibilityService() {
         target: String,
         text: String,
         rawDirection: String,
-        confirmed: Boolean
+        confirmed: Boolean,
+        visualCell: String,
+        suppliedVisualToken: String
     ): Pair<Boolean, String> {
         val action = rawAction.trim().lowercase(Locale.ROOT)
         val direction = rawDirection.trim().lowercase(Locale.ROOT)
@@ -124,6 +139,13 @@ class JarvisAccessibilityService : AccessibilityService() {
                 "home" -> globalAction(GLOBAL_ACTION_HOME, "Went to the Home screen.")
                 else -> globalAction(GLOBAL_ACTION_RECENTS, "Opened recent apps.")
             }
+        }
+
+        if (action == "visual_tap") {
+            if (isSensitive(action, target, text) && !confirmed) {
+                return false to "This visual action may send, purchase, delete, call, or share something. Ask the user for confirmation, then repeat it with confirmed=true."
+            }
+            return performVisualTap(visualCell, suppliedVisualToken)
         }
 
         val expectedSnapshot = currentSnapshotId
@@ -151,6 +173,52 @@ class JarvisAccessibilityService : AccessibilityService() {
             "type", "input", "write" -> typeIntoRef(node, text, entry.label)
             "scroll" -> scrollRef(node, direction)
             else -> false to "Unsupported visible-screen action. Use tap, type, scroll, back, home, or overview."
+        }
+    }
+
+    private fun performVisualTap(cell: String, suppliedToken: String): Pair<Boolean, String> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return false to "Visual gestures are not supported on this Android version."
+        }
+        val expectedToken = visualToken
+            ?: return false to "No fresh visual grounding is available. Call inspect_visual_screen before visual_tap."
+        if (suppliedToken.isBlank() || suppliedToken != expectedToken) {
+            return false to "The visual grounding token is missing or stale. Capture a fresh visual screen before trying again."
+        }
+        if (System.currentTimeMillis() - visualTokenCreatedAt > 15_000L) {
+            visualToken = null
+            visualGestureAreas.clear()
+            return false to "The visual grounding expired. Capture a fresh visual screen before trying again."
+        }
+        if (visualGestureConsumed) {
+            return false to "The visual grounding was already used. Inspect the visual screen again and verify the result before another visual gesture."
+        }
+
+        val normalized = cell.trim().uppercase(Locale.ROOT)
+        val match = Regex("^([A-H])(1[0-2]|[1-9])$").matchEntire(normalized)
+            ?: return false to "Use a visible grid cell such as C7 from the latest visual inspection."
+        val column = match.groupValues[1][0] - 'A'
+        val row = match.groupValues[2].toInt() - 1
+        val area = "${column / 2}:${row / 2}"
+        if (!visualGestureAreas.add(area)) {
+            return false to "A visual gesture was already attempted in this screen area. Capture a fresh visual screen before retrying."
+        }
+        if (visualWidth <= 0 || visualHeight <= 0) {
+            return false to "The visual screenshot dimensions are unavailable. Capture a fresh visual screen before trying again."
+        }
+
+        val x = (column + 0.5f) * visualWidth / 8f
+        val y = (row + 0.5f) * visualHeight / 12f
+        val path = android.graphics.Path().apply { moveTo(x, y) }
+        val gesture = android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0L, 80L))
+            .build()
+        val accepted = dispatchGesture(gesture, null, null)
+        return if (accepted) {
+            visualGestureConsumed = true
+            true to "Requested one visual tap at grid cell $normalized. Inspect the screen again to verify the result."
+        } else {
+            false to "Android rejected the visual gesture. Inspect the screen again before retrying."
         }
     }
 
@@ -193,6 +261,10 @@ class JarvisAccessibilityService : AccessibilityService() {
     private fun describeVisibleScreen(): String {
         val root = rootInActiveWindow
             ?: return JSONObject().put("success", false).put("message", "No accessible screen is currently visible.").toString()
+
+        visualToken = null
+        visualGestureConsumed = false
+        visualGestureAreas.clear()
 
         snapshotCounter += 1
         val snapshotId = "a${snapshotCounter.toString(36)}${UUID.randomUUID().toString().take(6)}"
@@ -245,11 +317,19 @@ class JarvisAccessibilityService : AccessibilityService() {
                                 bitmap.compress(Bitmap.CompressFormat.JPEG, 82, output)
                                 val width = bitmap.width
                                 val height = bitmap.height
+                                val token = "v${UUID.randomUUID().toString().replace("-", "").take(10)}"
+                                visualToken = token
+                                visualTokenCreatedAt = System.currentTimeMillis()
+                                visualWidth = width
+                                visualHeight = height
+                                visualGestureConsumed = false
+                                visualGestureAreas.clear()
                                 bitmap.recycle()
                                 result = VisualCapture(
                                     Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP),
                                     width,
-                                    height
+                                    height,
+                                    token
                                 )
                             }
                         } catch (_: Exception) {

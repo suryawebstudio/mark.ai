@@ -251,7 +251,7 @@ class LiveVoiceManager(
                                             "You are speaking directly with the user in a live voice conversation. " +
                                             "You may open an installed app or a listed Android Settings page only when the user directly asks. You may turn the flashlight on or off with set_flashlight when requested. You may capture one still image with capture_camera_image only when the user directly asks what the camera sees; never capture continuously or secretly. " +
                                             "Android protects many system settings. For Wi-Fi and Bluetooth, open the system control panel or Settings page first. If MARK Accessibility is enabled, inspect the visible panel and tap only the exact visible Wi-Fi or Bluetooth switch the user requested; otherwise tell the user Android requires them to tap the switch. Never claim a protected setting changed unless the tool response or a follow-up screen inspection confirms it. " +
-                                            "When MARK Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools; it does not grant hidden access to every phone setting. inspect_visible_screen returns a snapshot_id, a complete flag, and refs such as @a1abc123:e1. If complete is false, inspect again before choosing a target. For tap, type, and scroll, always pass the exact snapshot_id and ref from the latest inspection; never guess labels or reuse an old ref. MARK re-identifies refs from stable role/name/description evidence and rejects ambiguous matches, so if it reports a stale or ambiguous ref, inspect again and choose from the new snapshot. Back, Home, and overview do not need a ref. Accessibility is always the primary path. If the tree is incomplete or does not expose a requested visible control, use inspect_visual_screen once as a visual fallback; it sends one current screenshot with an 8-column by 12-row labeled grid to the vision session. Use the grid only to understand custom-drawn pixels, then prefer semantic refs whenever they become available. Never use visual fallback to bypass passwords, biometrics, CAPTCHAs, permission dialogs, or security screens. " +
+                                            "When MARK Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools; it does not grant hidden access to every phone setting. inspect_visible_screen returns a snapshot_id, a complete flag, and refs such as @a1abc123:e1. If complete is false, inspect again before choosing a target. For tap, type, and scroll, always pass the exact snapshot_id and ref from the latest inspection; never guess labels or reuse an old ref. MARK re-identifies refs from stable role/name/description evidence and rejects ambiguous matches, so if it reports a stale or ambiguous ref, inspect again and choose from the new snapshot. Back, Home, and overview do not need a ref. Accessibility is always the primary path. If the tree is incomplete or does not expose a requested visible control, use inspect_visual_screen once as a visual fallback; it sends one current screenshot with an 8-column by 12-row labeled grid and a short-lived grounding_token to the vision session. Use visual_tap only for a clearly visible custom-drawn target, passing the exact grid cell and grounding_token from the latest visual inspection. A visual token permits only one gesture and expires quickly; inspect again to verify it before any further visual gesture. Never use visual fallback to bypass passwords, biometrics, CAPTCHAs, permission dialogs, or security screens. " +
                                             "For a multi-step request, first call start_task, then execute it as a task: inspect the screen before the first control action, perform one action at a time, inspect the screen again after every control action, then continue only when the result matches the intended step. Tool responses include status, verified, retryable, and task_state fields; success means the request was accepted, while verified=true means the outcome was confirmed. Never issue multiple phone-control function calls in one turn; wait for each function response before choosing the next action. Do not call complete_task until the requested outcome is verified. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
                                             "Use inspect_visible_screen before every target-dependent action. If MARK reports a stale or invalid ref, inspect again and retry with the new ref. Never claim an action succeeded unless its function response says it did. " +
                                             "For sending, deleting, purchasing, calling, sharing, posting, installing, or other consequential actions, ask the user for confirmation first and then repeat the blocked action with confirmed=true only after the user explicitly agrees. " +
@@ -475,7 +475,7 @@ class LiveVoiceManager(
             put("name", "control_visible_screen")
             put(
                 "description",
-                "Perform one narrow action on the current visible screen: tap a visible control, type into a visible text field, scroll, or use Back, Home, or recent apps. Accessibility must be enabled by the user. For tap, type, and scroll, use the exact snapshot_id and ref returned by the latest inspect_visible_screen; stale refs are rejected."
+                "Perform one narrow action on the current visible screen: tap a semantic control, type into a visible text field, scroll, use Back, Home, or recent apps, or perform one guarded visual_tap on a custom-drawn target. Accessibility must be enabled by the user. For tap, type, and scroll, use the exact snapshot_id and ref returned by the latest inspect_visible_screen; stale refs are rejected. For visual_tap, use only the exact grid cell and grounding_token returned by the latest inspect_visual_screen; visual taps are single-use and repeated same-area coordinates are rejected until a fresh visual inspection."
             )
             put(
                 "parameters",
@@ -484,12 +484,14 @@ class LiveVoiceManager(
                     put(
                         "properties",
                         JSONObject()
-                            .put("action", JSONObject().put("type", "STRING").put("enum", JSONArray().put("tap").put("type").put("scroll").put("back").put("home").put("overview")))
+                            .put("action", JSONObject().put("type", "STRING").put("enum", JSONArray().put("tap").put("visual_tap").put("type").put("scroll").put("back").put("home").put("overview")))
                             .put("snapshot_id", JSONObject().put("type", "STRING").put("description", "The snapshot_id returned by the latest inspect_visible_screen. Required for tap, type, and scroll."))
                             .put("ref", JSONObject().put("type", "STRING").put("description", "The exact ref returned by the latest inspect_visible_screen, such as @a1abc123:e1. Required for tap, type, and scroll."))
                             .put("target", JSONObject().put("type", "STRING").put("description", "Optional human-readable label used for confirmation context; do not use it to guess a target."))
                             .put("text", JSONObject().put("type", "STRING").put("description", "Text to type when action is type."))
                             .put("direction", JSONObject().put("type", "STRING").put("enum", JSONArray().put("up").put("down")))
+                            .put("visual_cell", JSONObject().put("type", "STRING").put("description", "For visual_tap only: exact grid cell such as C7 from the latest visual inspection."))
+                            .put("visual_token", JSONObject().put("type", "STRING").put("description", "For visual_tap only: exact short-lived grounding_token from the latest inspect_visual_screen result."))
                             .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
                     )
                     put("required", JSONArray().put("action"))
@@ -779,7 +781,9 @@ class LiveVoiceManager(
                     target = args.optString("target"),
                     text = args.optString("text"),
                     direction = args.optString("direction"),
-                    confirmed = args.optBoolean("confirmed", false)
+                    confirmed = args.optBoolean("confirmed", false),
+                    visualCell = args.optString("visual_cell"),
+                    visualToken = args.optString("visual_token")
                 )
                 else -> false to "This phone action is not supported."
             }
@@ -820,7 +824,7 @@ class LiveVoiceManager(
             return false to "The visual screenshot could not be sent to the live vision session."
         }
         status("VISUAL SCREEN SENT ${capture.width}x${capture.height}")
-        return true to "One visual screen inspection was sent to the live vision session with an 8 by 12 grounding grid."
+        return true to "One visual screen inspection was sent to the live vision session with an 8 by 12 grounding grid. grounding_token=${capture.token}. Use this token only for one clearly visible visual_tap, then inspect again."
     }
 
     private fun launchInstalledApp(requestedName: String): Pair<Boolean, String> {
