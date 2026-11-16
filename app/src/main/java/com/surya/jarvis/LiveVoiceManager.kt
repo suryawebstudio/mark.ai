@@ -1080,7 +1080,7 @@ class LiveVoiceManager(
                 INPUT_RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
-                maxOf(minBuffer, 6400)
+                maxOf(minBuffer, 3200)
             )
 
             if (recorder.state != AudioRecord.STATE_INITIALIZED) {
@@ -1115,7 +1115,10 @@ class LiveVoiceManager(
             recorder.startRecording()
 
             recorderThread = Thread {
-                val buffer = ByteArray(3200)
+                // 1600 bytes is 50 ms of mono 16-bit PCM at 16 kHz. Smaller
+                // packets reduce time-to-first-response without creating a
+                // high-rate flood of WebSocket messages.
+                val buffer = ByteArray(1600)
 
                 while (running.get() && setupComplete) {
                     val count = recorder.read(
@@ -1131,7 +1134,7 @@ class LiveVoiceManager(
                     ) {
                         val playbackStillSettling = suppressMicrophone && (
                             playbackQueue.isNotEmpty() ||
-                                System.nanoTime() - lastPlaybackChunkAtNanos < 700_000_000L
+                                System.nanoTime() - lastPlaybackChunkAtNanos < 350_000_000L
                             )
 
                         if (playbackStillSettling) {
@@ -1259,7 +1262,8 @@ class LiveVoiceManager(
                             .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                             .build()
                     )
-                    .setBufferSizeInBytes(maxOf(minBuffer, 9600))
+                    .setBufferSizeInBytes(maxOf(minBuffer, 4800))
+                    .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
                     .setTransferMode(AudioTrack.MODE_STREAM)
                     .build()
 
