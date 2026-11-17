@@ -35,9 +35,15 @@ class JarvisVoiceForegroundService : Service() {
         }
 
         fun stop(context: android.content.Context) {
-            // Stop the running service directly. Sending a second startService
-            // command can leave the foreground notification alive on some devices.
-            context.stopService(Intent(context, JarvisVoiceForegroundService::class.java))
+            // Deliver an explicit stop command first so AudioRecord, AudioTrack,
+            // the WebSocket, and the foreground notification are released from
+            // onStartCommand instead of waiting for a delayed onDestroy callback.
+            val intent = Intent(context, JarvisVoiceForegroundService::class.java)
+                .setAction(ACTION_STOP)
+            runCatching { context.startService(intent) }
+                .onFailure {
+                    context.stopService(Intent(context, JarvisVoiceForegroundService::class.java))
+                }
         }
     }
 
@@ -64,12 +70,10 @@ class JarvisVoiceForegroundService : Service() {
         try {
             when (intent?.action) {
                 ACTION_STOP -> {
-                    // Mark the service stopped before callbacks are delivered. This prevents
-                    // the manager's final status callback from trying to update a removed
-                    // foreground notification during service destruction.
                     isRunning = false
+                    voiceManager?.stopListening()
                     stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
+                    stopSelf(startId)
                 }
 
                 ACTION_START -> {
