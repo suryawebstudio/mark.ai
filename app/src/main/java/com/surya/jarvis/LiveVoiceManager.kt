@@ -108,6 +108,7 @@ class LiveVoiceManager(
         .build()
 
     private val running = AtomicBoolean(false)
+    private val reconnectScheduled = AtomicBoolean(false)
     // The service can call stop(), onTaskRemoved(), and release() close together.
     // Only the first shutdown is allowed to release the audio/WebSocket resources.
     private val stopped = AtomicBoolean(true)
@@ -127,6 +128,8 @@ class LiveVoiceManager(
 
     @Volatile
     private var setupComplete = false
+    @Volatile
+    private var sessionResumptionHandle: String? = null
 
     private var webSocket: WebSocket? = null
     private var audioRecord: AudioRecord? = null
@@ -166,6 +169,10 @@ class LiveVoiceManager(
         setupComplete = false
         status("REQUESTING TEMPORARY TOKEN...")
 
+        connectToLive()
+    }
+
+    private fun connectToLive() {
         Thread {
             try {
                 val tokenRequest = Request.Builder()
@@ -267,7 +274,14 @@ class LiveVoiceManager(
                             }
                         )
 
-                        put("sessionResumption", JSONObject())
+                        put(
+                            "sessionResumption",
+                            JSONObject().apply {
+                                sessionResumptionHandle
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?.let { put("handle", it) }
+                            }
+                        )
                         put("tools", phoneControlTools())
                     }
                 )
@@ -317,6 +331,21 @@ class LiveVoiceManager(
 
                 if (json.has("error")) {
                     fail("LIVE SERVICE ERROR — PLEASE TRY AGAIN")
+                    return
+                }
+
+                json.optJSONObject("sessionResumptionUpdate")?.let { update ->
+                    val handle = listOf("newHandle", "handle", "token")
+                        .asSequence()
+                        .map { update.optString(it) }
+                        .firstOrNull { it.isNotBlank() }
+                    if (update.optBoolean("resumable", false) && handle != null) {
+                        sessionResumptionHandle = handle
+                    }
+                }
+
+                if (json.has("goAway")) {
+                    scheduleReconnect(250L)
                     return
                 }
 
@@ -379,7 +408,7 @@ class LiveVoiceManager(
                 "HTTP ${it.code}: ${it.message}"
             } ?: t.message
 
-            fail("WEBSOCKET ERROR: $details")
+            scheduleReconnect(1_000L, "WEBSOCKET RECONNECTING: $details")
         }
 
         override fun onClosed(
@@ -390,8 +419,60 @@ class LiveVoiceManager(
             setupComplete = false
 
             if (running.get()) {
-                fail("SESSION CLOSED: $code $reason")
+                scheduleReconnect(1_000L, "SESSION RECONNECTING: $code $reason")
             }
+        }
+    }
+
+    private fun scheduleReconnect(
+        delayMs: Long,
+        message: String = "RECONNECTING TO MARK LIVE..."
+    ) {
+        if (!running.get() || stopped.get()) return
+        if (!reconnectScheduled.compareAndSet(false, true)) return
+
+        status(message)
+        Thread {
+            try {
+                Thread.sleep(delayMs)
+                if (!running.get() || stopped.get()) return@Thread
+
+                setupComplete = false
+                recorderThread?.interrupt()
+                runCatching { audioRecord?.stop() }
+                runCatching { audioRecord?.release() }
+                audioRecord = null
+                recorderThread = null
+
+                playbackGeneration.incrementAndGet()
+                playbackQueue.clear()
+                playbackThread?.interrupt()
+                playbackThread = null
+                runCatching { audioTrack?.pause() }
+                runCatching { audioTrack?.flush() }
+                runCatching { audioTrack?.release() }
+                audioTrack = null
+                runCatching { echoCanceler?.release() }
+                runCatching { noiseSuppressor?.release() }
+                echoCanceler = null
+                noiseSuppressor = null
+
+                runCatching { webSocket?.cancel() }
+                webSocket = null
+                reconnectScheduled.set(false)
+                connectToLive()
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                reconnectScheduled.set(false)
+            } catch (_: Exception) {
+                reconnectScheduled.set(false)
+                if (running.get() && !stopped.get()) {
+                    scheduleReconnect(2_000L)
+                }
+            }
+        }.apply {
+            isDaemon = true
+            start()
         }
     }
 
