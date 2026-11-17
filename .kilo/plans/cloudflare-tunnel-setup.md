@@ -1,92 +1,90 @@
-# Cloudflare Quick Tunnel Setup Plan
+# MARK Project File Download Plan
 
 ## Objective
-Expose the MARK file manager (running on port 8080) via Cloudflare Quick Tunnel to get a public HTTPS URL for Android phone access.
+Make MARK project files downloadable via public HTTPS URL using Cloudflare Quick Tunnel, with proper authentication and verification.
 
 ## Current State
 - ✅ File server running on `0.0.0.0:8080` (gunicorn, 4 workers, daemon mode)
-- ✅ Password protection: `mark2024` (needs rotation for production)
-- ✅ Session secret: fixed key (needs rotation for production)
+- ⚠️ Password: `mark2024` (example, needs rotation)
+- ⚠️ Secret: fixed key (example, needs rotation)
 - ✅ Server accessible locally at `http://127.0.0.1:8080`
+- ✅ Files exist: `PROJECT_EXPORT.zip` (40MB), `app-debug.apk` (128MB)
+- ⚠️ Cloudflare Tunnel works but platform kills background processes after ~2 min
+
+## Platform Constraints
+- Background processes killed ~2 min after shell exits
+- No `nohup`, daemon mode, or background processes survive
+- Must run tunnel in **foreground** in a **persistent terminal**
 
 ## Plan Steps
 
-### 1. Check cloudflared Installation
+### 1. Generate Secure Credentials
 ```bash
-which cloudflared
-cloudflared --version
+# Generate new password (32 chars base64)
+export FILE_MANAGER_PASSWORD=$(openssl rand -base64 32)
+
+# Generate new secret key (32 chars base64)
+export SECRET_KEY=$(openssl rand -base64 32)
+
+# Restart file manager with new credentials
+pkill -f gunicorn
+export FILE_MANAGER_PASSWORD
+export SECRET_KEY
+cd /workspace/app
+nohup gunicorn --bind 0.0.0.0:8080 --workers 4 --timeout 120 --daemon file_manager:app
 ```
 
-### 2. Check Architecture
-```bash
-uname -m
-# Expected: x86_64 (amd64)
-```
+### 2. Check Kilo Port Forwarding
+- Check Kilo dashboard for "Port Forwarding" or "Public URL" feature
+- If available: configure port 8080 forwarding → provides direct HTTPS URL
+- If unavailable: proceed to step 3
 
-### 3. Install cloudflared (if missing)
+### 3. Start Cloudflare Quick Tunnel in Persistent Terminal
 ```bash
-# For x86_64
-wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
-chmod +x cloudflared
-# Verify
-./cloudflared --version
-```
-
-### 4. Verify Local Server
-```bash
-curl -I http://127.0.0.1:8080
-# Expect: 302 redirect to /login
-```
-
-### 5. Start Cloudflare Quick Tunnel
-```bash
+# In a persistent terminal session:
+cd /workspace/app
 ./cloudflared tunnel --url http://127.0.0.1:8080
 ```
+- Must keep terminal **open and in foreground**
+- Capture generated URL: `https://<random>.trycloudflare.com`
 
-This will:
-- Output a public HTTPS URL like `https://<random>.trycloudflare.com`
-- Keep running in foreground (Ctrl+C to stop)
-
-### 6. Capture Public URL
-Wait for output like:
-```
-| INFO| Starting tunnel for http://127.0.0.1:8080
-| INFO| Your quick tunnel has been generated! Visit https://abc123.trycloudflare.com
-```
-
-### 7. Verify External Access
+### 4. Verify Public Access
 ```bash
-# From local machine or another terminal:
+# Test public URL
 curl -I https://<generated>.trycloudflare.com
 # Expect: 302 redirect to /login
 ```
 
-### 8. Verify Login Page
-Open `https://<generated>.trycloudflare.com/login` in browser → should show MARK login page.
+### 5. Verify File Downloads
+- Open `https://<generated>.trycloudflare.com/login` in browser
+- Login with new password
+- Test downloads:
+  - `PROJECT_EXPORT.zip` (40MB)
+  - `app-debug.apk` (128MB)
 
-### 9. Verify Downloads
-- Login with password `mark2024`
-- Download `PROJECT_EXPORT.zip` (40MB)
-- Download `app-debug.apk` (128MB)
+### 6. Report Results
+- Actual public HTTPS URL
+- Login credentials (password only, not in logs)
+- Confirmation of external access
+- Download instructions for ZIP and APK
+- Note: tunnel must remain in foreground in persistent terminal
 
-## Security Notes (Pre-Production)
-- **Rotate password**: Generate strong random password before public exposure
-- **Rotate secret key**: Generate new `SECRET_KEY` before public exposure
-- **Don't expose**: Never print secrets in logs or responses
+## Files to Download
+| File | Size | Local Path |
+|------|------|------------|
+| PROJECT_EXPORT.zip | 40 MB | /workspace/app/PROJECT_EXPORT.zip |
+| app-debug.apk | 128 MB | /workspace/app/app/build/outputs/apk/debug/app-debug.apk |
 
-## Persistence
-- Tunnel runs in foreground → stops if terminal closes
-- **Restart command**: Re-run `./cloudflared tunnel --url http://127.0.0.1:8080`
-- **For background**: Use `nohup ./cloudflared tunnel --url http://127.0.0.1:8080 > /tmp/tunnel.log 2>&1 &`
+## Security Requirements
+- ✅ Generate new random password (not `mark2024`)
+- ✅ Generate new random secret key
+- ✅ Never print secrets in logs or final report
+- ✅ Password protection mandatory on all routes
 
 ## Deliverables
-1. Public HTTPS URL (e.g., `https://xyz.trycloudflare.com`)
-2. Login instructions (password: `mark2024` - rotate for production)
-3. Confirmation of external access
-4. ZIP/APK download instructions
-5. Tunnel restart command
-
-## Open Questions
-1. Should we use a named tunnel instead of quick tunnel for persistence?
-2. Do we need custom domain or is trycloudflare.com sufficient?
-3. Should we add rate limiting or IP restrictions?
+1. Actual public HTTPS URL (from cloudflared)
+2. Login instructions (password provided separately)
+3. Confirmation that external access works
+4. ZIP download instructions
+5. APK download instructions
+6. Note: tunnel must remain in foreground in persistent terminal
