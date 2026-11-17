@@ -2,6 +2,7 @@ package com.surya.jarvis.execution
 
 import com.surya.jarvis.accessibility.UnifiedScreen
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 
 class RecoveryEngine(
     private val screenObserver: ScreenObserver,
@@ -46,14 +47,15 @@ class RecoveryEngine(
         return when (action) {
             is RecoveryAction.ReinspectAndReplan -> {
                 val newScreen = screenObserver.inspectSemantic()
-                val newPlan = planner.createPlan(task.context.withScreen(newScreen!!))
+                val context = task.context ?: return RecoveryResult.Failed("No task context available")
+                val newPlan = planner.createPlan(context.withScreen(newScreen!!))
                 task.currentPlan = newPlan
                 RecoveryResult.Success("Re-planned after: ${action.reason}", newPlan)
             }
             
             is RecoveryAction.WaitAndRetry -> {
                 delay(action.delayMs)
-                RecoveryResult.Success("Waited ${action.delayMs}ms, retrying: ${action.reason}")
+                RecoveryResult.Success("Waited ${action.delayMs}ms, retrying: ${action.reason}", null)
             }
             
             is RecoveryAction.Explore -> {
@@ -66,8 +68,9 @@ class RecoveryEngine(
                     if (isKnownScreen(exploredScreen, task.targetPackage)) {
                         break
                     }
+                    val context = task.context ?: return RecoveryResult.Failed("No task context available")
                     val backResult = executor.execute(
-                        ActionStep.GlobalAction(ActionStep.GlobalActionType.BACK), 
+                        ActionStep.GlobalAction(ActionStep.GlobalActionType.BACK, "back", VerificationConfig(VerificationType.GLOBAL_STATE)), 
                         exploredScreen
                     )
                     if (!backResult.success) break
@@ -75,7 +78,8 @@ class RecoveryEngine(
                     attempts++
                 }
                 
-                val newPlan = planner.createPlan(task.context.withScreen(exploredScreen))
+                val context = task.context ?: return RecoveryResult.Failed("No task context available")
+                val newPlan = planner.createPlan(context.withScreen(exploredScreen))
                 task.currentPlan = newPlan
                 RecoveryResult.Success("Explored to known state: ${action.reason}", newPlan)
             }
@@ -92,8 +96,9 @@ class RecoveryEngine(
                     if (screen.packageName == task.targetPackage && isKnownScreen(screen, task.targetPackage)) {
                         break
                     }
+                    val context = task.context ?: return RecoveryResult.Failed("No task context available")
                     val backResult = executor.execute(
-                        ActionStep.GlobalAction(ActionStep.GlobalActionType.BACK), 
+                        ActionStep.GlobalAction(ActionStep.GlobalActionType.BACK, "back", VerificationConfig(VerificationType.GLOBAL_STATE)), 
                         screen
                     )
                     if (!backResult.success) break
@@ -101,7 +106,7 @@ class RecoveryEngine(
                     attempts++
                 }
                 
-                RecoveryResult.Success("Returned to known screen: ${action.reason}")
+                RecoveryResult.Success("Returned to known screen: ${action.reason}", null)
             }
             
             is RecoveryAction.RetryWithAdjustment -> {
@@ -119,7 +124,26 @@ class RecoveryEngine(
         return screen.packageName == targetPackage && 
                screen.elements.isNotEmpty() &&
                (screen.elements.any { it.role in setOf("Tab", "BottomNavigationView", "NavigationBarView", "ActionBar", "Toolbar") } ||
-                screen.classifyScreen() != ScreenClass.UNKNOWN)
+                classifyScreen(screen) != ScreenClass.UNKNOWN)
+    }
+    
+    private fun classifyScreen(screen: UnifiedScreen): ScreenClass {
+        if (screen.elements.any { it.role == "AlertDialog" || it.role.contains("Dialog") }) {
+            return ScreenClass.DIALOG
+        }
+        if (screen.elements.any { it.role.contains("ProgressBar") || it.text.lowercase().contains("loading") }) {
+            return ScreenClass.LOADING
+        }
+        if (screen.elements.any { it.editable }) {
+            return ScreenClass.FORM
+        }
+        if (screen.elements.any { it.scrollable && it.childrenRefs.size > 3 }) {
+            return ScreenClass.LIST
+        }
+        if (screen.packageName == screen.launcherPackageName) {
+            return ScreenClass.HOME
+        }
+        return ScreenClass.DETAIL
     }
 }
 
@@ -168,6 +192,7 @@ enum class ErrorType {
     TYPE_FAILED,
     SCROLL_FAILED,
     VERIFICATION_FAILED,
+    GLOBAL_ACTION_FAILED,
     UNKNOWN;
     
     fun isRetryable(): Boolean = this in setOf(

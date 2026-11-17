@@ -1,14 +1,19 @@
 package com.surya.jarvis.execution
 
 import android.accessibilityservice.AccessibilityService
-import android.graphics.Path
-import android.graphics.Rect
+import android.content.Intent
 import android.os.Bundle
 import android.view.ViewConfiguration
 import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.graphics.Rect
 import com.surya.jarvis.accessibility.UnifiedScreen
 import com.surya.jarvis.accessibility.SemanticElement
+import com.surya.jarvis.JarvisAccessibilityService
 import kotlin.math.sqrt
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.abs
 
 class ActionExecutor(
     private val accessibilityService: AccessibilityService
@@ -47,21 +52,22 @@ class ActionExecutor(
             return ExecutionResult.failed(ErrorType.DISABLED_TARGET, "Element is not clickable")
         }
         
-        // Method 1: Accessibility action (primary)
-        val clickable = findClickableAncestor(node) ?: node
-        var success = clickable.performAction(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK
+        val result = JarvisAccessibilityService.control(
+            snapshotId = screen.snapshotId,
+            ref = step.ref,
+            action = "tap",
+            target = step.target,
+            text = "",
+            direction = "",
+            confirmed = true,
+            visualCell = "",
+            visualToken = ""
         )
         
-        // Method 2: Gesture to element bounds center (fallback)
-        if (!success) {
-            success = dispatchTapGesture(clickable.bounds.centerX().toFloat(), clickable.bounds.centerY().toFloat())
-        }
-        
-        return if (success) {
+        return if (result.first) {
             ExecutionResult.success("Tapped ${step.target}")
         } else {
-            ExecutionResult.failed(ErrorType.GESTURE_REJECTED, "Both click and gesture failed")
+            ExecutionResult.failed(ErrorType.GESTURE_REJECTED, result.second)
         }
     }
     
@@ -73,21 +79,22 @@ class ActionExecutor(
             return ExecutionResult.failed(ErrorType.NOT_EDITABLE, "Element is not editable")
         }
         
-        val arguments = Bundle().apply {
-            putCharSequence(
-                android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                step.text
-            )
-        }
-        val success = node.performAction(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
-            arguments
+        val result = JarvisAccessibilityService.control(
+            snapshotId = screen.snapshotId,
+            ref = step.ref,
+            action = "type",
+            target = step.target,
+            text = step.text,
+            direction = "",
+            confirmed = true,
+            visualCell = "",
+            visualToken = ""
         )
         
-        return if (success) {
+        return if (result.first) {
             ExecutionResult.success("Typed into ${step.target}")
         } else {
-            ExecutionResult.failed(ErrorType.TYPE_FAILED, "Field could not accept text")
+            ExecutionResult.failed(ErrorType.TYPE_FAILED, result.second)
         }
     }
     
@@ -99,17 +106,28 @@ class ActionExecutor(
             return ExecutionResult.failed(ErrorType.NOT_SCROLLABLE, "Element is not scrollable")
         }
         
-        val action = when (step.direction.lowercase()) {
-            "up", "backward", "previous" -> android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-            "down", "forward", "next", "" -> android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+        val direction = when (step.direction.lowercase()) {
+            "up", "backward", "previous" -> "up"
+            "down", "forward", "next", "" -> "down"
             else -> return ExecutionResult.failed(ErrorType.UNKNOWN, "Use scroll direction up or down")
         }
         
-        val success = node.performAction(action)
-        return if (success) {
+        val result = JarvisAccessibilityService.control(
+            snapshotId = screen.snapshotId,
+            ref = step.ref,
+            action = "scroll",
+            target = step.target,
+            text = "",
+            direction = direction,
+            confirmed = true,
+            visualCell = "",
+            visualToken = ""
+        )
+        
+        return if (result.first) {
             ExecutionResult.success("Scrolled ${step.direction}")
         } else {
-            ExecutionResult.failed(ErrorType.SCROLL_FAILED, "Could not scroll")
+            ExecutionResult.failed(ErrorType.SCROLL_FAILED, result.second)
         }
     }
     
@@ -117,84 +135,155 @@ class ActionExecutor(
         val node = screen.findElementByRef(step.ref)
             ?: return ExecutionResult.failed(ErrorType.STALE_REF, "Ref not found")
         
-        val target = findLongClickableAncestor(node) ?: node
-        val centerX = target.bounds.centerX().toFloat()
-        val centerY = target.bounds.centerY().toFloat()
+        val result = JarvisAccessibilityService.control(
+            snapshotId = screen.snapshotId,
+            ref = step.ref,
+            action = "long_press",
+            target = step.target,
+            text = "",
+            direction = "",
+            confirmed = true,
+            visualCell = "",
+            visualToken = ""
+        )
         
-        return dispatchLongPressGesture(centerX, centerY, "Long-pressed ${step.target}")
+        return if (result.first) {
+            ExecutionResult.success("Long-pressed ${step.target}")
+        } else {
+            ExecutionResult.failed(ErrorType.GESTURE_REJECTED, result.second)
+        }
     }
     
     private fun executeSwipe(step: ActionStep.Swipe, screen: UnifiedScreen): ExecutionResult {
         val node = screen.findElementByRef(step.ref)
             ?: return ExecutionResult.failed(ErrorType.STALE_REF, "Ref not found")
         
-        val bounds = node.bounds
-        val (startX, startY, endX, endY) = when (step.direction.lowercase()) {
-            "swipe_left" -> bounds.right.toFloat() to bounds.centerY().toFloat() to bounds.left.toFloat() to bounds.centerY().toFloat()
-            "swipe_right" -> bounds.left.toFloat() to bounds.centerY().toFloat() to bounds.right.toFloat() to bounds.centerY().toFloat()
-            "swipe_up" -> bounds.centerX().toFloat() to bounds.bottom.toFloat() to bounds.centerX().toFloat() to bounds.top.toFloat()
-            "swipe_down" -> bounds.centerX().toFloat() to bounds.top.toFloat() to bounds.centerX().toFloat() to bounds.bottom.toFloat()
-            else -> return ExecutionResult.failed(ErrorType.UNKNOWN, "Invalid swipe direction")
+        val direction = step.direction.lowercase()
+        if (direction !in setOf("swipe_left", "swipe_right", "swipe_up", "swipe_down")) {
+            return ExecutionResult.failed(ErrorType.UNKNOWN, "Invalid swipe direction")
         }
         
-        return dispatchSwipeGesture(startX, startY, endX, endY, "Swiped ${step.direction}")
+        val result = JarvisAccessibilityService.control(
+            snapshotId = screen.snapshotId,
+            ref = step.ref,
+            action = direction,
+            target = step.target,
+            text = "",
+            direction = "",
+            confirmed = true,
+            visualCell = "",
+            visualToken = ""
+        )
+        
+        return if (result.first) {
+            ExecutionResult.success("Swiped ${step.direction}")
+        } else {
+            ExecutionResult.failed(ErrorType.GESTURE_REJECTED, result.second)
+        }
     }
     
     private fun executeDrag(step: ActionStep.Drag, screen: UnifiedScreen): ExecutionResult {
         val node = screen.findElementByRef(step.ref)
             ?: return ExecutionResult.failed(ErrorType.STALE_REF, "Ref not found")
         
-        val bounds = node.bounds
-        val startX = bounds.centerX().toFloat()
-        val startY = bounds.centerY().toFloat()
-        val targetX = step.targetX
-        val targetY = step.targetY
+        val result = JarvisAccessibilityService.control(
+            snapshotId = screen.snapshotId,
+            ref = step.ref,
+            action = "drag",
+            target = step.target,
+            text = step.targetX.toString(),
+            direction = step.targetY.toString(),
+            confirmed = true,
+            visualCell = "",
+            visualToken = ""
+        )
         
-        return dispatchDragGesture(startX, startY, targetX, targetY, "Dragged ${step.target}")
+        return if (result.first) {
+            ExecutionResult.success("Dragged ${step.target}")
+        } else {
+            ExecutionResult.failed(ErrorType.GESTURE_REJECTED, result.second)
+        }
     }
     
     private fun executeDoubleTap(step: ActionStep.DoubleTap, screen: UnifiedScreen): ExecutionResult {
         val node = screen.findElementByRef(step.ref)
             ?: return ExecutionResult.failed(ErrorType.STALE_REF, "Ref not found")
         
-        val clickable = findClickableAncestor(node) ?: node
-        val centerX = clickable.bounds.centerX().toFloat()
-        val centerY = clickable.bounds.centerY().toFloat()
+        val result = JarvisAccessibilityService.control(
+            snapshotId = screen.snapshotId,
+            ref = step.ref,
+            action = "double_tap",
+            target = step.target,
+            text = "",
+            direction = "",
+            confirmed = true,
+            visualCell = "",
+            visualToken = ""
+        )
         
-        return dispatchDoubleTapGesture(centerX, centerY, "Double-tapped ${step.target}")
+        return if (result.first) {
+            ExecutionResult.success("Double-tapped ${step.target}")
+        } else {
+            ExecutionResult.failed(ErrorType.GESTURE_REJECTED, result.second)
+        }
     }
     
     private fun executePinchZoom(step: ActionStep.PinchZoom, screen: UnifiedScreen): ExecutionResult {
         val node = screen.findElementByRef(step.ref)
             ?: return ExecutionResult.failed(ErrorType.STALE_REF, "Ref not found")
         
-        val bounds = node.bounds
-        val centerX = bounds.centerX().toFloat()
-        val centerY = bounds.centerY().toFloat()
-        val radius = min(bounds.width(), bounds.height()) / 4f
+        val action = if (step.pinchIn) "pinch_in" else "pinch_out"
+        val result = JarvisAccessibilityService.control(
+            snapshotId = screen.snapshotId,
+            ref = step.ref,
+            action = action,
+            target = step.target,
+            text = "",
+            direction = "",
+            confirmed = true,
+            visualCell = "",
+            visualToken = ""
+        )
         
-        return dispatchPinchGesture(centerX, centerY, radius, step.pinchIn, "Pinched ${if (step.pinchIn) "in" else "out"} ${step.target}")
+        return if (result.first) {
+            ExecutionResult.success("Pinched ${if (step.pinchIn) "in" else "out"} ${step.target}")
+        } else {
+            ExecutionResult.failed(ErrorType.GESTURE_REJECTED, result.second)
+        }
     }
     
     private fun executeGlobalAction(step: ActionStep.GlobalAction): ExecutionResult {
         val action = when (step.actionType) {
-            ActionStep.GlobalActionType.BACK -> AccessibilityService.GLOBAL_ACTION_BACK
-            ActionStep.GlobalActionType.HOME -> AccessibilityService.GLOBAL_ACTION_HOME
-            ActionStep.GlobalActionType.RECENTS -> AccessibilityService.GLOBAL_ACTION_RECENTS
-            ActionStep.GlobalActionType.NOTIFICATIONS -> AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS
-            ActionStep.GlobalActionType.QUICK_SETTINGS -> AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS
+            ActionStep.GlobalActionType.BACK -> "back"
+            ActionStep.GlobalActionType.HOME -> "home"
+            ActionStep.GlobalActionType.RECENTS -> "overview"
+            ActionStep.GlobalActionType.NOTIFICATIONS -> "notifications"
+            ActionStep.GlobalActionType.QUICK_SETTINGS -> "quick_settings"
         }
-        val success = accessibilityService.performGlobalAction(action)
-        return if (success) {
+        
+        val result = JarvisAccessibilityService.control(
+            snapshotId = "",
+            ref = "",
+            action = action,
+            target = step.target,
+            text = "",
+            direction = "",
+            confirmed = true,
+            visualCell = "",
+            visualToken = ""
+        )
+        
+        return if (result.first) {
             ExecutionResult.success("Global action: ${step.actionType}")
         } else {
-            ExecutionResult.failed(ErrorType.GLOBAL_ACTION_FAILED, "Global action rejected")
+            ExecutionResult.failed(ErrorType.GLOBAL_ACTION_FAILED, result.second)
         }
     }
     
     private fun executeIntent(step: ActionStep.IntentAction): ExecutionResult {
         return try {
-            accessibilityService.context.startActivity(step.intent)
+            step.intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            accessibilityService.startActivity(step.intent)
             ExecutionResult.success("Intent launched")
         } catch (e: Exception) {
             ExecutionResult.failed(ErrorType.INTENT_FAILED, e.message ?: "Intent failed")
@@ -217,7 +306,7 @@ class ActionExecutor(
         }
     }
     
-    // Gesture dispatch methods
+    // Gesture dispatch methods (fallback for when accessibility service is not available)
     private fun dispatchTapGesture(x: Float, y: Float): Boolean {
         val path = Path().apply { moveTo(x, y) }
         val stroke = GestureDescription.StrokeDescription(path, 0L, 80L)
@@ -275,15 +364,33 @@ class ActionExecutor(
     }
     
     private fun dispatchPinchGesture(centerX: Float, centerY: Float, radius: Float, pinchIn: Boolean, description: String): ExecutionResult {
-        val (start1X, start1Y, end1X, end1Y) = if (pinchIn) {
-            centerX - radius to centerY to centerX - radius / 2 to centerY
+        val start1X: Float
+        val start1Y: Float
+        val end1X: Float
+        val end1Y: Float
+        val start2X: Float
+        val start2Y: Float
+        val end2X: Float
+        val end2Y: Float
+        
+        if (pinchIn) {
+            start1X = centerX - radius
+            start1Y = centerY
+            end1X = centerX - radius / 2
+            end1Y = centerY
+            start2X = centerX + radius
+            start2Y = centerY
+            end2X = centerX + radius / 2
+            end2Y = centerY
         } else {
-            centerX - radius / 2 to centerY to centerX - radius to centerY
-        }
-        val (start2X, start2Y, end2X, end2Y) = if (pinchIn) {
-            centerX + radius to centerY to centerX + radius / 2 to centerY
-        } else {
-            centerX + radius / 2 to centerY to centerX + radius to centerY
+            start1X = centerX - radius / 2
+            start1Y = centerY
+            end1X = centerX - radius
+            end1Y = centerY
+            start2X = centerX + radius / 2
+            start2Y = centerY
+            end2X = centerX + radius
+            end2Y = centerY
         }
         
         val path1 = Path().apply { moveTo(start1X, start1Y); lineTo(end1X, end1Y) }
@@ -298,23 +405,12 @@ class ActionExecutor(
     
     private fun calculateSwipeDuration(x1: Float, y1: Float, x2: Float, y2: Float): Long {
         val distance = sqrt((x1 - x2).pow(2) + (y1 - y2).pow(2))
-        return (distance / 2f).coerceIn(200, 800).toLong()
+        return (distance / 2f).coerceIn(200f, 800f).toLong()
     }
     
     private fun calculateDragDuration(x1: Float, y1: Float, x2: Float, y2: Float): Long {
         val distance = sqrt((x1 - x2).pow(2) + (y1 - y2).pow(2))
-        return (distance / 1.5f).coerceIn(300, 1500).toLong()
-    }
-    
-    private fun findClickableAncestor(node: SemanticElement): SemanticElement? {
-        if (node.clickable) return node
-        node.childrenRefs.mapNotNull { /* Would need parent lookup */ null }
-        return null
-    }
-    
-    private fun findLongClickableAncestor(node: SemanticElement): SemanticElement? {
-        if (node.longClickable) return node
-        return null
+        return (distance / 1.5f).coerceIn(300f, 1500f).toLong()
     }
 }
 

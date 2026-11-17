@@ -4,6 +4,8 @@ import android.content.Context
 import com.surya.jarvis.accessibility.UnifiedScreen
 import com.surya.jarvis.accessibility.SemanticElement
 import com.surya.jarvis.knowledge.AppKnowledge
+import com.surya.jarvis.knowledge.KeyElement
+import com.surya.jarvis.knowledge.AccessibilityLevel
 import com.surya.jarvis.knowledge.AppKnowledgeManager
 import com.surya.jarvis.execution.ActionExecutor
 import com.surya.jarvis.execution.ActionStep
@@ -115,29 +117,29 @@ class ExplorationEngine(
             
             val discovery = KeyElementDiscovery(
                 role = role,
-                resourceIds = (existing?.resourceIds.orEmpty() + element.nativeId).distinct().filter { it.isNotBlank() },
+                resourceIds = (existing?.resourceIds.orEmpty() + (element.nativeId ?: "")).distinct().filter { it.isNotBlank() },
                 textPatterns = (existing?.textPatterns.orEmpty() + element.text).distinct().filter { it.isNotBlank() },
                 descriptionPatterns = (existing?.descriptionPatterns.orEmpty() + element.description).distinct().filter { it.isNotBlank() },
-                actionTypes = existing?.actionTypes.orEmpty().plus(
+                actionTypes = existing?.actionTypes.orEmpty() + setOf(
                     if (element.clickable) "click" else null,
                     if (element.editable) "type" else null,
                     if (element.scrollable) "scroll" else null
-                ).filterNotNull().toSet()
+                ).filterNotNull()
             )
             
             knowledge[role] = discovery
         }
     }
     
-    private fun determineAccessibilityLevel(screen: UnifiedScreen): AppKnowledge.AccessibilityLevel {
+    private fun determineAccessibilityLevel(screen: UnifiedScreen): AccessibilityLevel {
         val actionableCount = screen.elements.count { it.actionable }
         val hasNativeIds = screen.elements.any { it.nativeId != null }
         
         return when {
-            actionableCount > 10 && hasNativeIds -> AppKnowledge.AccessibilityLevel.FULL
-            actionableCount > 5 -> AppKnowledge.AccessibilityLevel.PARTIAL
-            actionableCount > 0 -> AppKnowledge.AccessibilityLevel.MINIMAL
-            else -> AppKnowledge.AccessibilityLevel.NONE
+            actionableCount > 10 && hasNativeIds -> AccessibilityLevel.FULL
+            actionableCount > 5 -> AccessibilityLevel.PARTIAL
+            actionableCount > 0 -> AccessibilityLevel.MINIMAL
+            else -> AccessibilityLevel.NONE
         }
     }
     
@@ -174,8 +176,8 @@ data class KeyElementDiscovery(
     val descriptionPatterns: List<String>,
     val actionTypes: Set<String>
 ) {
-    fun toKeyElement(): AppKnowledge.KeyElement {
-        return AppKnowledge.KeyElement(
+    fun toKeyElement(): KeyElement {
+        return KeyElement(
             role = role,
             resourceIds = resourceIds,
             textPatterns = textPatterns,
@@ -190,8 +192,8 @@ sealed class ExplorationResult {
         val packageName: String,
         val screensExplored: Int,
         val elementsDiscovered: Int,
-        val accessibilityLevel: AppKnowledge.AccessibilityLevel,
-        val keyElements: Map<String, AppKnowledge.KeyElement>
+        val accessibilityLevel: AccessibilityLevel,
+        val keyElements: Map<String, KeyElement>
     ) : ExplorationResult()
     
     data class Failed(val reason: String) : ExplorationResult()

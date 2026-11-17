@@ -1,0 +1,102 @@
+{
+  "packageName": "com.whatsapp",
+  "appName": "WhatsApp",
+  "versionCode": 240115000,
+  "versionName": "2.24.1.5",
+  "launcherActivity": "com.whatsapp.HomeActivity",
+  "mainActivities": ["com.whatsapp.HomeActivity", "com.whatsapp.Conversation"],
+  "accessibilityLevel": "PARTIAL",
+  "keyElements": {
+    "search_button": {
+      "role": "Button",
+      "resourceIds": ["com.whatsapp:id/menuitem_search"],
+      "textPatterns": ["Search"],
+      "descriptionPatterns": ["Search"],
+      "actionTypes": ["click"]
+    },
+    "search_field": {
+      "role": "EditText",
+      "resourceIds": ["com.whatsapp:id/search_src_text"],
+      "textPatterns": ["Search"],
+      "descriptionPatterns": ["Search"],
+      "actionTypes": ["type"]
+    },
+    "chat_list": {
+      "role": "ListView",
+      "resourceIds": ["com.whatsapp:id/conversations_list", "android:id/list"],
+      "actionTypes": ["scroll"]
+    },
+    "chat_row": {
+      "role": "View",
+      "resourceIds": ["com.whatsapp:id/conversations_row_contact_name"],
+      "actionTypes": ["click"]
+    },
+    "message_input": {
+      "role": "EditText",
+      "resourceIds": ["com.whatsapp:id/entry"],
+      "textPatterns": ["Type a message"],
+      "actionTypes": ["type"]
+    },
+    "send_button": {
+      "role": "Button",
+      "resourceIds": ["com.whatsapp:id/send"],
+      "descriptionPatterns": ["Send"],
+      "actionTypes": ["click"]
+    },
+    "attach_button": {
+      "role": "Button",
+      "resourceIds": ["com.whatsapp:id/attach"],
+      "descriptionPatterns": ["Attach"],
+      "actionTypes": ["click"]
+    },
+    "voice_message_button": {
+      "role": "Button",
+      "resourceIds": ["com.whatsapp:id/voice_note_btn"],
+      "descriptionPatterns": ["Voice message"],
+      "actionTypes": ["long_press"]
+    },
+    "new_chat_fab": {
+      "role": "Button",
+      "resourceIds": ["com.whatsapp:id/fab"],
+      "descriptionPatterns": ["New chat"],
+      "actionTypes": ["click"]
+    },
+    "menu_button": {
+      "role": "Button",
+      "resourceIds": ["com.whatsapp:id/menuitem_overflow"],
+      "descriptionPatterns": ["More options"],
+      "actionTypes": ["click"]
+    },
+    "back_button": {
+      "role": "Button",
+      "resourceIds": ["com.whatsapp:id/action_bar_button_back"],
+      "descriptionPatterns": ["Back"],
+      "actionTypes": ["click"]
+    }
+  },
+  "navigationPatterns": {},
+  "workflows": {
+    "send_message": {
+      "name": "send_message",
+      "description": "Send a message to a contact",
+      "triggers": ["send", "message", "whatsapp"],
+      "startScreen": "chat_list",
+      "steps": [
+        { "action": "tap", "targetRole": "search_button", "verification": { "type": "element_present", "params": { "targetRole": "search_field" } } },
+        { "action": "type", "targetRole": "search_field", "params": { "text": "{{contactName}}" }, "verification": { "type": "element_present", "params": { "targetRole": "chat_row" } } },
+        { "action": "tap", "targetRole": "chat_row", "params": { "matchText": "{{contactName}}" }, "verification": { "type": "element_present", "params": { "targetRole": "message_input" } } },
+        { "action": "tap", "targetRole": "message_input", "verification": { "type": "element_present", "params": { "targetRole": "message_input" } } },
+        { "action": "type", "targetRole": "message_input", "params": { "text": "{{message}}" }, "verification": { "type": "text_contains", "params": { "expectedText": "{{message}}" } } },
+        { "action": "tap", "targetRole": "send_button", "params": { "confirmed": "true" }, "verification": { "type": "element_present", "params": { "targetRole": "message_list" } }, "requiresConfirmation": true }
+      ],
+      "requiresConfirmation": true
+    }
+  },
+  "commonDialogs": [],
+  "intents": {
+    "send_message": "whatsapp://send?phone={{phone}}&text={{text}}"
+  },
+  "deepLinks": {
+    "chat": "whatsapp://chat?phone={{phone}}"
+  }
+}

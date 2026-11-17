@@ -5,6 +5,7 @@ import com.surya.jarvis.knowledge.AppKnowledge
 import com.surya.jarvis.knowledge.AppKnowledgeManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.math.pow
 
 class TaskCoordinator(
     private val planner: ActionPlanner,
@@ -65,8 +66,8 @@ class TaskCoordinator(
                 is SafetyGates.SensitiveActionValidation.Blocked -> {
                     return TaskResult.failed(validation.reason)
                 }
-                is SafetyGates.SensitiveActionValidation.Allowed -> {
-                    // Proceed
+                else -> {
+                    // Allowed or any other case - proceed
                 }
             }
             
@@ -132,14 +133,14 @@ class TaskCoordinator(
             }
             
             if (attempt > retryPolicy.maxRetries) {
-                return TaskResult.failed("Max retries exceeded for step: ${step.action}")
+                return TaskResult.failed("Max retries exceeded for step: ${step.javaClass.simpleName}")
             }
         }
         
         return TaskResult.failed("Max steps ($maxSteps) exceeded")
     }
     
-    fun confirmAndRetry(): TaskResult {
+    suspend fun confirmAndRetry(): TaskResult {
         val task = currentTask ?: return TaskResult.failed("No active task")
         if (!task.awaitingConfirmation) {
             return TaskResult.failed("No confirmation pending")
@@ -194,8 +195,8 @@ class TaskCoordinator(
 
 class RetryPolicy {
     val maxRetries = 3
-    val baseDelayMs = 500
-    val maxDelayMs = 5000
+    val baseDelayMs = 500L
+    val maxDelayMs = 5000L
     
     fun shouldRetry(errorType: ErrorType, attempt: Int): Boolean {
         return attempt < maxRetries && errorType.isRetryable()

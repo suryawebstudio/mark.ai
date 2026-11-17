@@ -1,8 +1,10 @@
 package com.surya.jarvis.execution
 
 import com.surya.jarvis.accessibility.UnifiedScreen
+import com.surya.jarvis.accessibility.SemanticElement
 import com.surya.jarvis.knowledge.AppKnowledge
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 
 class VerificationEngine(
     private val screenObserver: ScreenObserver
@@ -14,6 +16,7 @@ class VerificationEngine(
         appKnowledge: AppKnowledge?
     ): VerificationResult {
         val newScreen = screenObserver.inspectSemantic()
+            ?: return VerificationResult.failed("Cannot inspect screen for verification")
         
         return when (step.verification.type) {
             VerificationType.ELEMENT_PRESENT -> verifyElementPresent(step, newScreen)
@@ -27,7 +30,7 @@ class VerificationEngine(
         }
     }
     
-    private fun verifyElementPresent(step: ActionStep, screen: UnifiedScreen): VerificationResult {
+    private suspend fun verifyElementPresent(step: ActionStep, screen: UnifiedScreen): VerificationResult {
         val targetRole = step.verification.params["targetRole"] 
             ?: return VerificationResult.failed("No targetRole specified")
         val timeoutMs = step.verification.params["timeoutMs"]?.toLong() ?: 3000L
@@ -47,7 +50,7 @@ class VerificationEngine(
         }
     }
     
-    private fun verifyElementGone(step: ActionStep, screen: UnifiedScreen): VerificationResult {
+    private suspend fun verifyElementGone(step: ActionStep, screen: UnifiedScreen): VerificationResult {
         val targetRole = step.verification.params["targetRole"] 
             ?: return VerificationResult.failed("No targetRole specified")
         val timeoutMs = step.verification.params["timeoutMs"]?.toLong() ?: 3000L
@@ -166,7 +169,7 @@ class VerificationEngine(
         // Check for significant changes in tree structure
         val beforeCount = before.elements.size
         val afterCount = after.elements.size
-        val countChanged = (beforeCount - afterCount).absoluteValue > 3
+        val countChanged = abs(beforeCount - afterCount) > 3
         
         // Check if specific target element state changed
         val targetRef = step.ref
@@ -199,7 +202,7 @@ class VerificationEngine(
     }
     
     private fun classifyScreen(screen: UnifiedScreen): ScreenClass {
-        if (screen.elements.any { it.role == "AlertDialog" || it.className?.contains("Dialog") == true }) {
+        if (screen.elements.any { it.role == "AlertDialog" || it.role.contains("Dialog") }) {
             return ScreenClass.DIALOG
         }
         if (screen.elements.any { it.role.contains("ProgressBar") || it.text.lowercase().contains("loading") }) {

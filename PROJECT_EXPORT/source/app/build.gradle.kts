@@ -35,7 +35,7 @@ val hasValidSigningProps =
 
 android {
     namespace = "com.surya.jarvis"
-    compileSdk = 36
+    compileSdk = 34
 
     // disable linter
     lint {
@@ -56,7 +56,7 @@ android {
     defaultConfig {
         applicationId = "com.surya.jarvis"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
 
@@ -172,4 +172,6 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    // For Task.await() extension on Play Services Tasks
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 }

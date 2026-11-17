@@ -2,6 +2,10 @@ package com.surya.jarvis.exploration
 
 import android.content.Context
 import com.surya.jarvis.knowledge.AppKnowledge
+import com.surya.jarvis.knowledge.KeyElement
+import com.surya.jarvis.knowledge.Workflow
+import com.surya.jarvis.knowledge.WorkflowStep
+import com.surya.jarvis.knowledge.VerificationTemplate
 import com.surya.jarvis.knowledge.AppKnowledgeManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +34,7 @@ class UserFeedbackHandler(
             resourceIds = (existing.resourceIds + correctRef).distinct(),
             textPatterns = (existing.textPatterns + targetDescription).distinct(),
             actionTypes = existing.actionTypes + correctAction
-        ) ?: AppKnowledge.KeyElement(
+        ) ?: KeyElement(
             role = role,
             resourceIds = listOf(correctRef),
             textPatterns = listOf(targetDescription),
@@ -53,12 +57,12 @@ class UserFeedbackHandler(
     ): Boolean {
         val knowledge = knowledgeManager.getKnowledge(packageName) ?: return false
         
-        val workflow = AppKnowledge.Workflow(
+        val workflow = Workflow(
             name = workflowName,
             description = "Learned workflow: $workflowName",
             triggers = steps.first().triggerKeywords,
             steps = steps.map { step ->
-                AppKnowledge.WorkflowStep(
+                WorkflowStep(
                     action = step.action,
                     targetRole = step.targetRole,
                     params = step.params,
@@ -128,7 +132,7 @@ data class WorkflowExecutionStep(
     val action: String,
     val targetRole: String,
     val params: Map<String, String>,
-    val verification: AppKnowledge.VerificationTemplate,
+    val verification: VerificationTemplate,
     val requiresConfirmation: Boolean,
     val triggerKeywords: List<String> = emptyList()
 )

@@ -48,21 +48,19 @@ class AppKnowledgeManager(private val context: Context) {
         newVersionName: String
     ): AppKnowledge? {
         val old = getKnowledgeSync(packageName) ?: return null
-        val migratedElements = old.keyElements.mapValues { (role, element) ->
-            role to element.copy(
-                versionHistory = element.versionHistory + VersionSnapshot(
-                    versionCode = newVersionCode,
-                    versionName = newVersionName,
-                    timestamp = System.currentTimeMillis(),
-                    keyElementChanges = mapOf(role to element.resourceIds),
-                    uiChanges = listOf("Version updated to $newVersionName")
-                )
-            )
-        }
+        val versionSnapshot = VersionSnapshot(
+            versionCode = newVersionCode,
+            versionName = newVersionName,
+            timestamp = System.currentTimeMillis(),
+            keyElementChanges = old.keyElements.mapValues { (_, element) ->
+                element.resourceIds
+            },
+            uiChanges = listOf("Version updated to $newVersionName")
+        )
         val migrated = old.copy(
             versionCode = newVersionCode,
             versionName = newVersionName,
-            keyElements = migratedElements,
+            versionHistory = old.versionHistory + versionSnapshot,
             lastVerified = System.currentTimeMillis()
         )
         updateKnowledge(migrated)

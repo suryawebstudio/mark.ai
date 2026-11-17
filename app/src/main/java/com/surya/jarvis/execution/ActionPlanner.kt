@@ -2,8 +2,10 @@ package com.surya.jarvis.execution
 
 import com.surya.jarvis.accessibility.UnifiedScreen
 import com.surya.jarvis.knowledge.AppKnowledge
+import com.surya.jarvis.knowledge.AppKnowledgeManager
 import com.surya.jarvis.knowledge.Workflow
 import com.surya.jarvis.knowledge.WorkflowStep
+import com.surya.jarvis.knowledge.VerificationTemplate
 import kotlinx.coroutines.delay
 
 class ActionPlanner(
@@ -76,7 +78,7 @@ class ActionPlanner(
         context: PlanningContext
     ): ActionPlan {
         val steps = workflow.steps.map { step ->
-            ActionStep.fromTemplate(step, context.currentScreen, context.targetApp)
+            step.toActionStep(context.currentScreen, context.targetApp)
         }
         
         return ActionPlan(
@@ -127,60 +129,59 @@ class ActionPlanner(
     }
 }
 
-fun ActionStep.fromTemplate(
-    template: WorkflowStep,
+fun WorkflowStep.toActionStep(
     screen: UnifiedScreen,
     appKnowledge: AppKnowledge?
 ): ActionStep {
     // Resolve target element from screen
-    val targetElement = screen.findElementByRole(template.targetRole)
-        ?: screen.elements.firstOrNull { it.clickable && it.text.contains(template.targetRole, ignoreCase = true) }
+    val targetElement = screen.findElementByRole(targetRole)
+        ?: screen.elements.firstOrNull { it.clickable && it.text.contains(targetRole, ignoreCase = true) }
     
     val ref = targetElement?.ref ?: "unknown"
-    val targetName = template.targetRole
+    val targetName = targetRole
     
-    return when (template.action) {
-        "tap" -> ActionStep.Tap(ref, targetName, template.verification.toConfig())
+    return when (action) {
+        "tap" -> ActionStep.Tap(ref, targetName, verification.toConfig())
         "type" -> ActionStep.Type(
             ref, 
-            template.params["text"] ?: "", 
+            params["text"] ?: "", 
             targetName, 
-            template.verification.toConfig()
+            verification.toConfig()
         )
         "scroll" -> ActionStep.Scroll(
             ref, 
-            template.params["direction"] ?: "down", 
+            params["direction"] ?: "down", 
             targetName, 
-            template.verification.toConfig()
+            verification.toConfig()
         )
-        "long_press" -> ActionStep.LongPress(ref, targetName, template.verification.toConfig())
-        "swipe_left" -> ActionStep.Swipe(ref, "swipe_left", targetName, template.verification.toConfig())
-        "swipe_right" -> ActionStep.Swipe(ref, "swipe_right", targetName, template.verification.toConfig())
-        "swipe_up" -> ActionStep.Swipe(ref, "swipe_up", targetName, template.verification.toConfig())
-        "swipe_down" -> ActionStep.Swipe(ref, "swipe_down", targetName, template.verification.toConfig())
+        "long_press" -> ActionStep.LongPress(ref, targetName, verification.toConfig())
+        "swipe_left" -> ActionStep.Swipe(ref, "swipe_left", targetName, verification.toConfig())
+        "swipe_right" -> ActionStep.Swipe(ref, "swipe_right", targetName, verification.toConfig())
+        "swipe_up" -> ActionStep.Swipe(ref, "swipe_up", targetName, verification.toConfig())
+        "swipe_down" -> ActionStep.Swipe(ref, "swipe_down", targetName, verification.toConfig())
         "drag" -> ActionStep.Drag(
             ref,
-            template.params["targetX"]?.toFloat() ?: 0f,
-            template.params["targetY"]?.toFloat() ?: 0f,
+            params["targetX"]?.toFloat() ?: 0f,
+            params["targetY"]?.toFloat() ?: 0f,
             targetName,
-            template.verification.toConfig()
+            verification.toConfig()
         )
-        "double_tap" -> ActionStep.DoubleTap(ref, targetName, template.verification.toConfig())
+        "double_tap" -> ActionStep.DoubleTap(ref, targetName, verification.toConfig())
         "back" -> ActionStep.GlobalAction(
             ActionStep.GlobalActionType.BACK,
             "back",
-            template.verification.toConfig()
+            verification.toConfig()
         )
         "home" -> ActionStep.GlobalAction(
             ActionStep.GlobalActionType.HOME,
             "home",
-            template.verification.toConfig()
+            verification.toConfig()
         )
-        else -> ActionStep.Tap(ref, targetName, template.verification.toConfig())
+        else -> ActionStep.Tap(ref, targetName, verification.toConfig())
     }
 }
 
-fun WorkflowStep.verification.toConfig(): VerificationConfig {
+fun VerificationTemplate.toConfig(): VerificationConfig {
     return VerificationConfig(
         type = when (type) {
             "element_present" -> VerificationType.ELEMENT_PRESENT
@@ -198,11 +199,4 @@ fun WorkflowStep.verification.toConfig(): VerificationConfig {
 
 interface LlmClient {
     suspend fun planSteps(context: PlanningContext): ActionPlan?
-}
-
-class AppKnowledgeManagerStub : AppKnowledgeManager(
-    null as android.content.Context
-) {
-    // Stub for testing - real implementation uses context
-    override fun getKnowledge(packageName: String): AppKnowledge? = null
 }

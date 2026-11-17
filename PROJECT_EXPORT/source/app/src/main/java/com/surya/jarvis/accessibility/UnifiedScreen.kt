@@ -33,7 +33,7 @@ data class SemanticElement(
     val text: String,
     val description: String,
     val nativeId: String?,
-    val bounds: Rect,
+    val bounds: RectBounds,
     val clickable: Boolean,
     val editable: Boolean,
     val scrollable: Boolean,
@@ -47,7 +47,29 @@ data class SemanticElement(
         get() = clickable || editable || scrollable || focusable || longClickable
     
     val visible: Boolean
-        get() = bounds.width() > 0 && bounds.height() > 0
+        get() = bounds.width > 0 && bounds.height > 0
+    
+    fun toRect(): Rect = bounds.toRect()
+}
+
+@Serializable
+data class RectBounds(
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int
+) {
+    val width: Int
+        get() = right - left
+    
+    val height: Int
+        get() = bottom - top
+    
+    fun toRect(): Rect = Rect(left, top, right, bottom)
+    
+    companion object {
+        fun fromRect(rect: Rect): RectBounds = RectBounds(rect.left, rect.top, rect.right, rect.bottom)
+    }
 }
 
 @Serializable
@@ -70,14 +92,14 @@ data class OcrScreenResult(
 @Serializable
 data class OcrBlockScreen(
     val text: String,
-    val bounds: Rect,
+    val bounds: RectBounds,
     val lines: List<OcrLineScreen>
 )
 
 @Serializable
 data class OcrLineScreen(
     val text: String,
-    val bounds: Rect,
+    val bounds: RectBounds,
     val confidence: Float,
     val words: List<OcrWordScreen>
 )
@@ -85,7 +107,7 @@ data class OcrLineScreen(
 @Serializable
 data class OcrWordScreen(
     val text: String,
-    val bounds: Rect,
+    val bounds: RectBounds,
     val confidence: Float
 )
 

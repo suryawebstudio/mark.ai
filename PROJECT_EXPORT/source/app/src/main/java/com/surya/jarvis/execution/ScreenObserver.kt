@@ -1,7 +1,8 @@
 package com.surya.jarvis.execution
 
 import com.surya.jarvis.accessibility.UnifiedScreen
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 interface ScreenObserver {
     suspend fun inspectSemantic(): UnifiedScreen?

@@ -3,6 +3,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -399,198 +400,212 @@ class LiveVoiceManager(
     }
 
     private fun phoneControlTools(): JSONArray {
-        val launchApp = JSONObject().apply {
-            put("name", "launch_app")
-            put(
-                "description",
-                "Open an installed Android app by its visible app name. Only launch the app; do not perform actions inside it."
-            )
-            put(
-                "parameters",
-                JSONObject().apply {
-                    put("type", "OBJECT")
-                    put(
-                        "properties",
-                        JSONObject().put(
-                            "app_name",
-                            JSONObject()
-                                .put("type", "STRING")
-                                .put("description", "The installed app's visible name, such as Chrome or Maps.")
-                        )
-                    )
-                    put("required", JSONArray().put("app_name"))
-                }
-            )
-        }
-
-        val openSettings = JSONObject().apply {
-            put("name", "open_settings_page")
-            put(
-                "description",
-                "Open one of the supported Android Settings screens or a system control panel. For Wi-Fi, use the Android Wi-Fi panel when available; for Bluetooth, open Bluetooth Settings. Android may require the user to tap protected switches, unless the visible switch can be controlled through enabled MARK Accessibility. Never claim a setting changed without confirmation."
-            )
-            put(
-                "parameters",
-                JSONObject().apply {
-                    put("type", "OBJECT")
-                    put(
-                        "properties",
-                        JSONObject().put(
-                            "page",
-                            JSONObject()
-                                .put("type", "STRING")
-                                .put("enum", JSONArray().put("general").put("quick_settings").put("wireless").put("wifi").put("bluetooth").put("nfc").put("display").put("sound").put("notifications").put("apps").put("battery").put("battery_saver").put("location").put("security").put("privacy").put("accessibility").put("date_time").put("keyboard").put("storage").put("vpn").put("cast").put("home"))
-                                .put("description", "Open a system page. Supported values include general, quick_settings, wireless, wifi, bluetooth, nfc, display, sound, notifications, apps, battery, battery_saver, location, security, privacy, accessibility, date_time, keyboard, storage, vpn, cast, or home. Android may require the user to make protected changes manually.")
-                        )
-                    )
-                    put("required", JSONArray().put("page"))
-                }
-            )
-        }
-
-        val inspectScreen = JSONObject().apply {
-            put("name", "inspect_visible_screen")
-            put(
-                "description",
-                "Read the accessible tree, labels, states, and actions currently visible on the foreground screen. The response includes snapshot_id, complete, and refs for actionable elements. The tool envelope also reports status, verified, retryable, and task_state. Use this before interacting when the target is unclear."
-            )
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val inspectVisualScreen = JSONObject().apply {
-            put("name", "inspect_visual_screen")
-            put("description", "Capture one current screenshot of the visible phone screen and send it to the active vision session with an 8-column by 12-row grid. Use only when inspect_visible_screen is incomplete or cannot expose a visible custom-drawn control. This is not continuous capture and does not bypass Android security screens. Requires Android 11+ and enabled MARK Accessibility.")
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val visualTap = JSONObject().apply {
-            put("name", "visual_tap")
-            put("description", "Perform a single visual tap on a grid cell from the latest inspect_visual_screen. Requires Android 11+ and enabled MARK Accessibility. The visual token is single-use and expires in 15 seconds.")
-            put("parameters", JSONObject().apply {
-                put("type", "OBJECT")
-                put("properties", JSONObject()
-                    .put("cell", JSONObject().put("type", "STRING").put("description", "Grid cell such as C7 from the latest visual inspection (columns A-H, rows 1-12)."))
-                    .put("token", JSONObject().put("type", "STRING").put("description", "The short-lived grounding_token from the latest inspect_visual_screen result."))
-                    .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
-                )
-                put("required", JSONArray().put("cell").put("token"))
-            )
-        }
-
-        val setFlashlight = JSONObject().apply {
-            put("name", "set_flashlight")
-            put("description", "Turn the phone flashlight on or off. This uses Android's flashlight API and requires the user to grant camera permission; no camera preview is opened.")
-            put("parameters", JSONObject().apply {
-                put("type", "OBJECT")
-                put("properties", JSONObject().put("enabled", JSONObject().put("type", "BOOLEAN").put("description", "True to turn the flashlight on, false to turn it off.")))
-                put("required", JSONArray().put("enabled"))
-            })
-        }
-
-        val captureCameraImage = JSONObject().apply {
-            put("name", "capture_camera_image")
-            put(
-                "description",
-                "Capture one still image from the rear camera and send it to the active MARK vision session. Use only after the user explicitly asks what the camera sees. This never starts continuous recording and requires camera permission."
-            )
-            put("parameters", JSONObject().apply {
-                put("type", "OBJECT")
-                put("properties", JSONObject())
-            })
-        }
-
-        val controlScreen = JSONObject().apply {
-            put("name", "control_visible_screen")
-            put(
-                "description",
-                "Perform one narrow action on the current visible screen: tap, long press, double tap, swipe, drag, pinch zoom, type into a visible text field, scroll, use Back, Home, or recent apps. Accessibility must be enabled by the user. For tap, long_press, double_tap, type, scroll, swipe, drag, pinch, use the exact snapshot_id and ref returned by the latest inspect_visible_screen; stale refs are rejected."
-            )
-            put(
-                "parameters",
-                JSONObject().apply {
-                    put("type", "OBJECT")
-                    put(
-                        "properties",
-                        JSONObject()
-                            .put("action", JSONObject().put("type", "STRING").put("enum", JSONArray().put("tap").put("long_press").put("double_tap").put("type").put("scroll").put("swipe_left").put("swipe_right").put("swipe_up").put("swipe_down").put("drag").put("pinch_in").put("pinch_out").put("back").put("home").put("overview")))
-                            .put("snapshot_id", JSONObject().put("type", "STRING").put("description", "The snapshot_id returned by the latest inspect_visible_screen. Required for tap, long_press, double_tap, type, scroll, swipe, drag, pinch."))
-                            .put("ref", JSONObject().put("type", "STRING").put("description", "The exact ref returned by the latest inspect_visible_screen, such as @a1abc123:e1. Required for tap, long_press, double_tap, type, scroll, swipe, drag, pinch."))
-                            .put("target", JSONObject().put("type", "STRING").put("description", "Optional human-readable label used for confirmation context; do not use it to guess a target."))
-                            .put("text", JSONObject().put("type", "STRING").put("description", "Text to type when action is type. For drag, use as targetX. For swipe/drag/pinch, not used."))
-                            .put("direction", JSONObject().put("type", "STRING").put("description", "For scroll: up/down. For swipe: swipe_left/swipe_right/swipe_up/swipe_down. For drag: targetY."))
-                            .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
-                    )
-                    put("required", JSONArray().put("action"))
-                }
-            )
-        }
-
-        val cancelTask = JSONObject().apply {
-            put("name", "cancel_task")
-            put("description", "Stop the current multi-step MARK task and clear its task state. Use when the user says stop, cancel, or abort.")
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val completeTask = JSONObject().apply {
-            put("name", "complete_task")
-            put("description", "Mark the current task complete only after the requested outcome has been verified. Do not use this after an unverified or failed action.")
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val startTask = JSONObject().apply {
-            put("name", "start_task")
-            put("description", "Start or reset a new multi-step MARK task before executing a complex user request.")
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val listFiles = JSONObject().apply {
-            put("name", "list_files")
-            put("description", "List files and folders in shared storage. Full storage access must be enabled by the user.")
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val createTextFile = JSONObject().apply {
-            put("name", "create_text_file")
-            put("description", "Create a new UTF-8 text file in shared storage. Full storage access must be enabled by the user.")
-            put("parameters", JSONObject().apply {
-                put("type", "OBJECT")
-                put("properties", JSONObject()
-                    .put("name", JSONObject().put("type", "STRING").put("description", "File name only, without folders."))
-                    .put("content", JSONObject().put("type", "STRING").put("description", "Complete text content.")))
-                put("required", JSONArray().put("name").put("content"))
-            })
-        }
-
-        val editTextFile = JSONObject().apply {
-            put("name", "edit_text_file")
-            put("description", "Replace the complete UTF-8 text content of an existing shared-storage file. Full storage access must be enabled by the user.")
-            put("parameters", JSONObject().apply {
-                put("type", "OBJECT")
-                put("properties", JSONObject()
-                    .put("name", JSONObject().put("type", "STRING").put("description", "Existing file name only, without folders."))
-                    .put("content", JSONObject().put("type", "STRING").put("description", "New complete text content.")))
-                put("required", JSONArray().put("name").put("content"))
-            })
-        }
-
-        val deleteFile = JSONObject().apply {
-            put("name", "delete_file")
-            put("description", "Permanently delete one file or folder from shared storage. Full storage access must be enabled by the user. Always ask the user to confirm aloud before calling this with confirmed=true.")
-            put("parameters", JSONObject().apply {
-                put("type", "OBJECT")
-                put("properties", JSONObject()
-                    .put("name", JSONObject().put("type", "STRING").put("description", "Exact file or folder name only, without folders."))
-                    .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "True only after the user explicitly confirms the exact deletion.")))
-                put("required", JSONArray().put("name").put("confirmed"))
-            })
-        }
-
+        val functionDeclarations = JSONArray()
+            .put(buildLaunchAppTool())
+            .put(buildOpenSettingsTool())
+            .put(buildSetFlashlightTool())
+            .put(buildCaptureCameraImageTool())
+            .put(buildInspectScreenTool())
+            .put(buildInspectVisualScreenTool())
+            .put(buildVisualTapTool())
+            .put(buildControlScreenTool())
+            .put(buildStartTaskTool())
+            .put(buildCancelTaskTool())
+            .put(buildCompleteTaskTool())
+            .put(buildListFilesTool())
+            .put(buildCreateTextFileTool())
+            .put(buildEditTextFileTool())
+            .put(buildDeleteFileTool())
+        
         return JSONArray().put(
-            JSONObject().put(
-                "functionDeclarations",
-                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(captureCameraImage).put(inspectScreen).put(inspectVisualScreen).put(visualTap).put(controlScreen).put(startTask).put(cancelTask).put(completeTask).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
-            )
+            JSONObject().put("functionDeclarations", functionDeclarations)
         )
+    }
+
+    private fun buildLaunchAppTool(): JSONObject = JSONObject().apply {
+        put("name", "launch_app")
+        put(
+            "description",
+            "Open an installed Android app by its visible app name. Only launch the app; do not perform actions inside it."
+        )
+        put(
+            "parameters",
+            JSONObject().apply {
+                put("type", "OBJECT")
+                put(
+                    "properties",
+                    JSONObject().put(
+                        "app_name",
+                        JSONObject()
+                            .put("type", "STRING")
+                            .put("description", "The installed app's visible name, such as Chrome or Maps.")
+                    )
+                )
+                put("required", JSONArray().put("app_name"))
+            }
+        )
+    }
+
+    private fun buildOpenSettingsTool(): JSONObject = JSONObject().apply {
+        put("name", "open_settings_page")
+        put(
+            "description",
+            "Open one of the supported Android Settings screens or a system control panel. For Wi-Fi, use the Android Wi-Fi panel when available; for Bluetooth, open Bluetooth Settings. Android may require the user to tap protected switches, unless the visible switch can be controlled through enabled MARK Accessibility. Never claim a setting changed without confirmation."
+        )
+        put(
+            "parameters",
+            JSONObject().apply {
+                put("type", "OBJECT")
+                put(
+                    "properties",
+                    JSONObject().put(
+                        "page",
+                        JSONObject()
+                            .put("type", "STRING")
+                            .put("enum", JSONArray().put("general").put("quick_settings").put("wireless").put("wifi").put("bluetooth").put("nfc").put("display").put("sound").put("notifications").put("apps").put("battery").put("battery_saver").put("location").put("security").put("privacy").put("accessibility").put("date_time").put("keyboard").put("storage").put("vpn").put("cast").put("home"))
+                            .put("description", "Open a system page. Supported values include general, quick_settings, wireless, wifi, bluetooth, nfc, display, sound, notifications, apps, battery, battery_saver, location, security, privacy, accessibility, date_time, keyboard, storage, vpn, cast, or home. Android may require the user to make protected changes manually.")
+                    )
+                )
+                put("required", JSONArray().put("page"))
+            }
+        )
+    }
+
+    private fun buildInspectScreenTool(): JSONObject = JSONObject().apply {
+        put("name", "inspect_visible_screen")
+        put(
+            "description",
+            "Read the accessible tree, labels, states, and actions currently visible on the foreground screen. The response includes snapshot_id, complete, and refs for actionable elements. The tool envelope also reports status, verified, retryable, and task_state. Use this before interacting when the target is unclear."
+        )
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildInspectVisualScreenTool(): JSONObject = JSONObject().apply {
+        put("name", "inspect_visual_screen")
+        put("description", "Capture one current screenshot of the visible phone screen and send it to the active vision session with an 8-column by 12-row grid. Use only when inspect_visible_screen is incomplete or cannot expose a visible custom-drawn control. This is not continuous capture and does not bypass Android security screens. Requires Android 11+ and enabled MARK Accessibility.")
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildVisualTapTool(): JSONObject = JSONObject().apply {
+        put("name", "visual_tap")
+        put("description", "Perform a single visual tap on a grid cell from the latest inspect_visual_screen. Requires Android 11+ and enabled MARK Accessibility. The visual token is single-use and expires in 15 seconds.")
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject()
+                .put("cell", JSONObject().put("type", "STRING").put("description", "Grid cell such as C7 from the latest visual inspection (columns A-H, rows 1-12)."))
+                .put("token", JSONObject().put("type", "STRING").put("description", "The short-lived grounding_token from the latest inspect_visual_screen result."))
+                .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
+            )
+            put("required", JSONArray().put("cell").put("token"))
+        })
+    }
+
+    private fun buildSetFlashlightTool(): JSONObject = JSONObject().apply {
+        put("name", "set_flashlight")
+        put("description", "Turn the phone flashlight on or off. This uses Android's flashlight API and requires the user to grant camera permission; no camera preview is opened.")
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject().put("enabled", JSONObject().put("type", "BOOLEAN").put("description", "True to turn the flashlight on, false to turn it off.")))
+            put("required", JSONArray().put("enabled"))
+        })
+    }
+
+    private fun buildCaptureCameraImageTool(): JSONObject = JSONObject().apply {
+        put("name", "capture_camera_image")
+        put(
+            "description",
+            "Capture one still image from the rear camera and send it to the active MARK vision session. Use only after the user explicitly asks what the camera sees. This never starts continuous recording and requires camera permission."
+        )
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject())
+        })
+    }
+
+    private fun buildControlScreenTool(): JSONObject = JSONObject().apply {
+        put("name", "control_visible_screen")
+        put(
+            "description",
+            "Perform one narrow action on the current visible screen: tap, long press, double tap, swipe, drag, pinch zoom, type into a visible text field, scroll, use Back, Home, or recent apps. Accessibility must be enabled by the user. For tap, long_press, double_tap, type, scroll, swipe, drag, pinch, use the exact snapshot_id and ref returned by the latest inspect_visible_screen; stale refs are rejected."
+        )
+        put(
+            "parameters",
+            JSONObject().apply {
+                put("type", "OBJECT")
+                put(
+                    "properties",
+                    JSONObject()
+                        .put("action", JSONObject().put("type", "STRING").put("enum", JSONArray().put("tap").put("long_press").put("double_tap").put("type").put("scroll").put("swipe_left").put("swipe_right").put("swipe_up").put("swipe_down").put("drag").put("pinch_in").put("pinch_out").put("back").put("home").put("overview")))
+                        .put("snapshot_id", JSONObject().put("type", "STRING").put("description", "The snapshot_id returned by the latest inspect_visible_screen. Required for tap, long_press, double_tap, type, scroll, swipe, drag, pinch."))
+                        .put("ref", JSONObject().put("type", "STRING").put("description", "The exact ref returned by the latest inspect_visible_screen, such as @a1abc123:e1. Required for tap, long_press, double_tap, type, scroll, swipe, drag, pinch."))
+                        .put("target", JSONObject().put("type", "STRING").put("description", "Optional human-readable label used for confirmation context; do not use it to guess a target."))
+                        .put("text", JSONObject().put("type", "STRING").put("description", "Text to type when action is type. For drag, use as targetX. For swipe/drag/pinch, not used."))
+                        .put("direction", JSONObject().put("type", "STRING").put("description", "For scroll: up/down. For swipe: swipe_left/swipe_right/swipe_up/swipe_down. For drag: targetY."))
+                        .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
+                )
+                put("required", JSONArray().put("action"))
+            }
+        )
+    }
+
+    private fun buildCancelTaskTool(): JSONObject = JSONObject().apply {
+        put("name", "cancel_task")
+        put("description", "Stop the current multi-step MARK task and clear its task state. Use when the user says stop, cancel, or abort.")
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildCompleteTaskTool(): JSONObject = JSONObject().apply {
+        put("name", "complete_task")
+        put("description", "Mark the current task complete only after the requested outcome has been verified. Do not use this after an unverified or failed action.")
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildStartTaskTool(): JSONObject = JSONObject().apply {
+        put("name", "start_task")
+        put("description", "Start or reset a new multi-step MARK task before executing a complex user request.")
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildListFilesTool(): JSONObject = JSONObject().apply {
+        put("name", "list_files")
+        put("description", "List files and folders in shared storage. Full storage access must be enabled by the user.")
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildCreateTextFileTool(): JSONObject = JSONObject().apply {
+        put("name", "create_text_file")
+        put("description", "Create a new UTF-8 text file in shared storage. Full storage access must be enabled by the user.")
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject()
+                .put("name", JSONObject().put("type", "STRING").put("description", "File name only, without folders."))
+                .put("content", JSONObject().put("type", "STRING").put("description", "Complete text content.")))
+            put("required", JSONArray().put("name").put("content"))
+        })
+    }
+
+    private fun buildEditTextFileTool(): JSONObject = JSONObject().apply {
+        put("name", "edit_text_file")
+        put("description", "Replace the complete UTF-8 text content of an existing shared-storage file. Full storage access must be enabled by the user.")
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject()
+                .put("name", JSONObject().put("type", "STRING").put("description", "Existing file name only, without folders."))
+                .put("content", JSONObject().put("type", "STRING").put("description", "New complete text content.")))
+            put("required", JSONArray().put("name").put("content"))
+        })
+    }
+
+    private fun buildDeleteFileTool(): JSONObject = JSONObject().apply {
+        put("name", "delete_file")
+        put("description", "Permanently delete one file or folder from shared storage. Full storage access must be enabled by the user. Always ask the user to confirm aloud before calling this with confirmed=true.")
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject()
+                .put("name", JSONObject().put("type", "STRING").put("description", "Exact file or folder name only, without folders."))
+                .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "True only after the user explicitly confirms the exact deletion.")))
+            put("required", JSONArray().put("name").put("confirmed"))
+        })
     }
 
     private fun handlePhoneToolCall(webSocket: WebSocket, toolCall: JSONObject) {
@@ -838,8 +853,7 @@ class LiveVoiceManager(
         // Decode bitmap for OCR
         val bitmap = decodeBase64ToBitmap(capture.jpegBase64)
         val ocrResult = runBlocking { ocrProcessor.recognizeText(bitmap) }
-        bitmap.recycle()
-
+        
         val ocrText = if (ocrResult.fullText.isNotBlank()) {
             "\n\nOCR extracted text:\n${ocrResult.fullText}"
         } else {

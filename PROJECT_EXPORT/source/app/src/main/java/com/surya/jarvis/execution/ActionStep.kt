@@ -2,7 +2,7 @@ package com.surya.jarvis.execution
 
 import android.content.Intent
 import com.surya.jarvis.accessibility.UnifiedScreen
-import java.awt.Point
+import com.surya.jarvis.knowledge.AppKnowledge
 
 sealed class ActionStep {
     abstract val ref: String?
@@ -10,120 +10,91 @@ sealed class ActionStep {
     abstract val verification: VerificationConfig
     
     data class Tap(
-        val ref: String,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
-    ) : ActionStep() {
-        override val ref: String get() = this.ref
-        override val target: String get() = this.target
-        override val verification: VerificationConfig get() = this.verification
-    }
+        override val ref: String,
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
+    ) : ActionStep()
     
     data class Type(
-        val ref: String,
+        override val ref: String,
         val text: String,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.TEXT_CONTAINS)
-    ) : ActionStep() {
-        override val ref: String get() = this.ref
-        override val verification: VerificationConfig get() = this.verification
-    }
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.TEXT_CONTAINS)
+    ) : ActionStep()
     
     data class Scroll(
-        val ref: String,
+        override val ref: String,
         val direction: String,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.ELEMENT_PRESENT)
-    ) : ActionStep() {
-        override val ref: String get() = this.ref
-        override val verification: VerificationConfig get() = this.verification
-    }
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.ELEMENT_PRESENT)
+    ) : ActionStep()
     
     data class LongPress(
-        val ref: String,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
-    ) : ActionStep() {
-        override val ref: String get() = this.ref
-        override val verification: VerificationConfig get() = this.verification
-    }
+        override val ref: String,
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
+    ) : ActionStep()
     
     data class Swipe(
-        val ref: String,
+        override val ref: String,
         val direction: String,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
-    ) : ActionStep() {
-        override val ref: String get() = this.ref
-        override val verification: VerificationConfig get() = this.verification
-    }
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
+    ) : ActionStep()
     
     data class Drag(
-        val ref: String,
+        override val ref: String,
         val targetX: Float,
         val targetY: Float,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
-    ) : ActionStep() {
-        override val ref: String get() = this.ref
-        override val verification: VerificationConfig get() = this.verification
-    }
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
+    ) : ActionStep()
     
     data class DoubleTap(
-        val ref: String,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
-    ) : ActionStep() {
-        override val ref: String get() = this.ref
-        override val verification: VerificationConfig get() = this.verification
-    }
+        override val ref: String,
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
+    ) : ActionStep()
     
     data class PinchZoom(
-        val ref: String,
+        override val ref: String,
         val pinchIn: Boolean,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
-    ) : ActionStep() {
-        override val ref: String get() = this.ref
-        override val verification: VerificationConfig get() = this.verification
-    }
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
+    ) : ActionStep()
     
     data class GlobalAction(
         val actionType: GlobalActionType,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.GLOBAL_STATE)
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.GLOBAL_STATE)
     ) : ActionStep() {
-        override val ref: String get() = null
-        override val verification: VerificationConfig get() = this.verification
+        override val ref: String? get() = null
     }
     
     enum class GlobalActionType { BACK, HOME, RECENTS, NOTIFICATIONS, QUICK_SETTINGS }
     
     data class IntentAction(
         val intent: Intent,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
     ) : ActionStep() {
-        override val ref: String get() = null
-        override val verification: VerificationConfig get() = this.verification
+        override val ref: String? get() = null
     }
     
     data class Wait(
         val durationMs: Long,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.ELEMENT_PRESENT)
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.ELEMENT_PRESENT)
     ) : ActionStep() {
-        override val ref: String get() = null
-        override val verification: VerificationConfig get() = this.verification
+        override val ref: String? get() = null
     }
     
     data class VerifyScreen(
         val expectedElements: List<String>,
-        val target: String,
-        val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
+        override val target: String,
+        override val verification: VerificationConfig = VerificationConfig(VerificationType.SCREEN_CHANGE)
     ) : ActionStep() {
-        override val ref: String get() = null
-        override val verification: VerificationConfig get() = this.verification
+        override val ref: String? get() = null
     }
 }
 
