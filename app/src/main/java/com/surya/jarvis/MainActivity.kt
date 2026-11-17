@@ -600,6 +600,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        JarvisFileManager(this).syncFullAccessState()
         runJs("applyNativeSettings();updateAssistantPermissionState()")
     }
 

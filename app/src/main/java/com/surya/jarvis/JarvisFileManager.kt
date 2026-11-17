@@ -26,6 +26,10 @@ class JarvisFileManager(private val context: Context) {
                 .getBoolean(KEY_FULL_ACCESS_ENABLED, false) &&
             Environment.isExternalStorageManager()
 
+    fun syncFullAccessState() {
+        if (fullAccessGranted()) setFullAccessEnabled(true)
+    }
+
     fun setFullAccessEnabled(enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
@@ -41,12 +45,17 @@ class JarvisFileManager(private val context: Context) {
             return false to "Full storage access requires Android 11 or newer."
         }
         return try {
-            context.startActivity(
-                Intent(
-                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    Uri.parse("package:${context.packageName}")
-                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
+            val appIntent = Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:${context.packageName}")
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val intent = if (appIntent.resolveActivity(context.packageManager) != null) {
+                appIntent
+            } else {
+                Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
             true to "Enable Allow access to manage all files for MARK, then return here."
         } catch (_: Exception) {
             false to "Android could not open the full storage access settings."
