@@ -24,6 +24,12 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Base64
 import androidx.core.content.ContextCompat
+import com.surya.jarvis.execution.AccessibilityScreenObserver
+import com.surya.jarvis.execution.ActionExecutor
+import com.surya.jarvis.execution.ActionStep
+import com.surya.jarvis.execution.ExecutionResult
+import com.surya.jarvis.execution.ExecutionStatus
+import com.surya.jarvis.execution.ScrollDirection
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -124,6 +130,8 @@ class LiveVoiceManager(
 
     private val fileManager = JarvisFileManager(context.applicationContext)
     private val memoryStore = JarvisMemoryStore(context.applicationContext)
+    private val screenObserver = AccessibilityScreenObserver()
+    private val actionExecutor = ActionExecutor(screenObserver)
 
     @Volatile
     private var setupComplete = false
@@ -690,6 +698,10 @@ class LiveVoiceManager(
             return ToolResult("failed", "Confirmation was not requested for a pending sensitive action. Ask the user before retrying.", taskState = taskState)
         }
 
+        if (name == "control_visible_screen") {
+            return executeUnifiedControlTool(args, confirmed)
+        }
+
         if (isPotentiallySensitive(name, args) && !confirmed) {
             taskStepCount += 1
             awaitingTaskConfirmation = true
@@ -714,6 +726,109 @@ class LiveVoiceManager(
             status("TASK STEP FAILED")
         }
         return resultFromPair(outcome, taskState, verified = outcome.first && name != "control_visible_screen")
+    }
+
+    private fun executeUnifiedControlTool(
+        args: JSONObject,
+        confirmed: Boolean
+    ): ToolResult {
+        val action = args.optString("action").trim().lowercase(Locale.ROOT)
+
+        // These navigation and visual fallback actions remain on the existing
+        // guarded service path; the unified executor handles semantic actions.
+        if (action in setOf("visual_tap", "home", "overview")) {
+            taskStepCount += 1
+            taskState = TaskState.EXECUTING
+            status("TASK STEP $taskStepCount/$MAX_TASK_STEPS")
+            val outcome = executePhoneTool("control_visible_screen", args)
+            if (outcome.first) {
+                taskState = TaskState.VERIFYING
+            } else {
+                taskState = TaskState.FAILED
+                status("TASK STEP FAILED")
+            }
+            return resultFromPair(outcome, taskState, verified = false)
+        }
+
+        val screen = screenObserver.inspect()
+            ?: return ToolResult(
+                status = "failed",
+                message = "No current accessible screen is available. Inspect the visible screen again after enabling MARK Accessibility.",
+                retryable = true,
+                taskState = taskState
+            )
+
+        val suppliedSnapshot = args.optString("snapshot_id")
+        if (action != "back" && suppliedSnapshot != screen.snapshotId) {
+            return ToolResult(
+                status = "stale_ref",
+                message = "The supplied snapshot_id is stale or missing. Inspect the visible screen again and use the latest snapshot_id and ref.",
+                retryable = true,
+                taskState = taskState
+            )
+        }
+
+        val step = when (action) {
+            "tap" -> ActionStep.Tap(args.optString("ref"))
+            "type" -> ActionStep.TypeText(args.optString("ref"), args.optString("text"))
+            "scroll" -> ActionStep.Scroll(
+                elementRef = args.optString("ref").takeIf { it.isNotBlank() },
+                direction = when (args.optString("direction").lowercase(Locale.ROOT)) {
+                    "up" -> ScrollDirection.UP
+                    "left" -> ScrollDirection.LEFT
+                    "right" -> ScrollDirection.RIGHT
+                    else -> ScrollDirection.DOWN
+                }
+            )
+            "back" -> ActionStep.Back()
+            else -> return ToolResult(
+                status = "failed",
+                message = "Unsupported semantic screen action. Use tap, type, scroll, or back.",
+                taskState = taskState
+            )
+        }
+
+        taskStepCount += 1
+        taskState = TaskState.EXECUTING
+        status("TASK STEP $taskStepCount/$MAX_TASK_STEPS")
+        val result = actionExecutor.execute(step, screen, confirmed)
+        return resultFromExecution(result)
+    }
+
+    private fun resultFromExecution(result: ExecutionResult): ToolResult {
+        return when (result.status) {
+            ExecutionStatus.ACCEPTED_UNVERIFIED -> {
+                awaitingTaskConfirmation = false
+                taskState = TaskState.VERIFYING
+                ToolResult(
+                    status = "success",
+                    message = result.message,
+                    verified = false,
+                    retryable = false,
+                    taskState = taskState
+                )
+            }
+            ExecutionStatus.CONFIRMATION_REQUIRED -> {
+                awaitingTaskConfirmation = true
+                taskState = TaskState.WAITING_FOR_CONFIRMATION
+                status("CONFIRMATION REQUIRED")
+                ToolResult(
+                    status = "confirmation_required",
+                    message = "${result.message} Ask the user to confirm, then repeat the same tool call with confirmed=true.",
+                    taskState = taskState
+                )
+            }
+            ExecutionStatus.REJECTED -> {
+                taskState = TaskState.FAILED
+                status("TASK ACTION REJECTED")
+                resultFromPair(false to result.message, taskState)
+            }
+            ExecutionStatus.FAILED -> {
+                taskState = TaskState.FAILED
+                status("TASK STEP FAILED")
+                resultFromPair(false to result.message, taskState)
+            }
+        }
     }
 
     private fun resultFromPair(
