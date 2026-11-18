@@ -84,6 +84,15 @@ class ActionExecutor(
             return ExecutionResult.rejected(step, reason)
         }
 
+        val safety = SafetyGates.evaluate(step, screen, confirmed)
+        when (safety.outcome) {
+            SafetyOutcome.ALLOW -> Unit
+            SafetyOutcome.REQUIRE_CONFIRMATION ->
+                return ExecutionResult.confirmationRequiredFor(step, safety.reason)
+            SafetyOutcome.BLOCK ->
+                return ExecutionResult.rejected(step, safety.reason)
+        }
+
         val (accepted, message) = runCatching { control.invoke(request) }
             .getOrElse { return ExecutionResult.failed(step, "Accessibility control failed: ${it.message ?: "unknown error"}") }
 
@@ -172,6 +181,9 @@ data class ExecutionResult(
 
         fun confirmationRequired(reason: String) =
             ExecutionResult(ExecutionStatus.CONFIRMATION_REQUIRED, reason, ActionStep.RequestConfirmation(reason))
+
+        fun confirmationRequiredFor(step: ActionStep, reason: String) =
+            ExecutionResult(ExecutionStatus.CONFIRMATION_REQUIRED, reason, step)
 
         fun rejected(step: ActionStep, message: String) =
             ExecutionResult(ExecutionStatus.REJECTED, message, step)
