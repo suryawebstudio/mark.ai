@@ -11,12 +11,12 @@ import org.json.JSONObject
  * It is deliberately read-only: no node is retained and no action is issued.
  */
 class AccessibilityScreenObserver(
-    private val inspect: () -> String = { JarvisAccessibilityService.inspectScreen() },
+    private val readSnapshot: () -> String = { JarvisAccessibilityService.inspectScreen() },
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) : ScreenObserver {
 
     override fun inspect(): UnifiedScreen? = runCatching {
-        parse(inspect(), clock())
+        parse(readSnapshot(), clock())
     }.getOrNull()
 
     internal fun parse(payload: String, timestamp: Long): UnifiedScreen? {
