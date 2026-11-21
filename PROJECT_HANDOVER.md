@@ -1,8 +1,8 @@
 # J.A.R.V.I.S. Android Assistant — Project Handover
 
-**Last updated:** 2026-11-12  
-**Repository:** [suryawebstudio/jarvis-android-assistant](https://github.com/suryawebstudio/jarvis-android-assistant)  
-**Default branch:** `main`  
+**Last updated:** 2026-11-12
+**Repository:** [suryawebstudio/jarvis-android-assistant](https://github.com/suryawebstudio/jarvis-android-assistant)
+**Default branch:** `main`
 **Status:** Live voice conversation is working on the user's Android phone; the initial limited phone-control tools have been implemented in code and still need end-to-end device testing.
 
 ## What this project is

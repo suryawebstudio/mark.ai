@@ -1,15 +1,18 @@
 package com.surya.jarvis
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.util.Base64
 import android.view.Display
+import android.view.ViewConfiguration
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
@@ -20,6 +23,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.sqrt
 
 /**
  * Provides narrow, visible-screen automation for MARK.
@@ -56,6 +62,9 @@ class JarvisAccessibilityService : AccessibilityService() {
         fun captureVisualScreen(): Pair<Boolean, VisualCapture?> = current?.captureScreenWithGrid()
             ?: (false to null)
 
+        fun authorizeConfirmation(action: String, target: String, text: String): String =
+            current?.issueConfirmation(action, target, text).orEmpty()
+
         fun control(
             snapshotId: String,
             ref: String,
@@ -65,7 +74,8 @@ class JarvisAccessibilityService : AccessibilityService() {
             direction: String,
             confirmed: Boolean,
             visualCell: String,
-            visualToken: String
+            visualToken: String,
+            confirmationToken: String = ""
         ): Pair<Boolean, String> = current?.performControl(
             snapshotId,
             ref,
@@ -75,7 +85,8 @@ class JarvisAccessibilityService : AccessibilityService() {
             direction,
             confirmed,
             visualCell,
-            visualToken
+            visualToken,
+            confirmationToken
         ) ?: (false to "Accessibility control is not enabled. Enable MARK in Android Accessibility settings first.")
 
         private fun errorMessage(message: String): String =
@@ -92,6 +103,9 @@ class JarvisAccessibilityService : AccessibilityService() {
     private var visualHeight = 0
     private var visualGestureConsumed = false
     private val visualGestureAreas = mutableSetOf<String>()
+    private var confirmationToken: String? = null
+    private var confirmationFingerprint: String? = null
+    private var confirmationCreatedAt = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -110,6 +124,8 @@ class JarvisAccessibilityService : AccessibilityService() {
         currentSnapshotId = null
         visualToken = null
         visualGestureAreas.clear()
+        confirmationToken = null
+        confirmationFingerprint = null
         if (current === this) current = null
         super.onDestroy()
     }
@@ -123,14 +139,15 @@ class JarvisAccessibilityService : AccessibilityService() {
         rawDirection: String,
         confirmed: Boolean,
         visualCell: String,
-        suppliedVisualToken: String
+        suppliedVisualToken: String,
+        suppliedConfirmationToken: String
     ): Pair<Boolean, String> {
         val action = rawAction.trim().lowercase(Locale.ROOT)
         val direction = rawDirection.trim().lowercase(Locale.ROOT)
 
         if (action.isBlank()) return false to "Specify a visible-screen action."
-        if (isSensitive(action, target, text) && !confirmed) {
-            return false to "This action may send, delete, purchase, call, or share something. Ask the user for confirmation, then repeat it with confirmed=true."
+        if (isSensitive(action, target, text) && !hasValidConfirmation(action, target, text, suppliedConfirmationToken)) {
+            return false to "Confirmation is required for this exact action. Ask the user to confirm, then retry with the confirmation token."
         }
 
         if (action in setOf("back", "home", "overview", "recent_apps")) {
@@ -142,8 +159,8 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
 
         if (action == "visual_tap") {
-            if (isSensitive(action, target, text) && !confirmed) {
-                return false to "This visual action may send, purchase, delete, call, or share something. Ask the user for confirmation, then repeat it with confirmed=true."
+            if (isSensitive(action, target, text) && !hasValidConfirmation(action, target, text, suppliedConfirmationToken)) {
+                return false to "Confirmation is required for this exact visual action."
             }
             return performVisualTap(visualCell, suppliedVisualToken)
         }
@@ -172,9 +189,38 @@ class JarvisAccessibilityService : AccessibilityService() {
             "tap", "click", "press" -> tapRef(node, entry.label)
             "type", "input", "write" -> typeIntoRef(node, text, entry.label)
             "scroll" -> scrollRef(node, direction)
-            else -> false to "Unsupported visible-screen action. Use tap, type, scroll, back, home, or overview."
+            "long_press" -> longPressRef(node, entry.label)
+            "swipe_left", "swipe_right", "swipe_up", "swipe_down" -> swipeElement(node, action, entry.label)
+            "drag" -> dragElement(node, text.toFloatOrNull() ?: 0f, direction.toFloatOrNull() ?: 0f, entry.label)
+            "double_tap" -> doubleTapRef(node, entry.label)
+            "pinch_in", "pinch_out" -> pinchZoom(node, action, entry.label)
+            else -> false to "Unsupported visible-screen action. Use tap, type, scroll, long_press, swipe, drag, double_tap, pinch, back, home, or overview."
         }
     }
+
+    private fun issueConfirmation(action: String, target: String, text: String): String {
+        if (!isSensitive(action, target, text)) return ""
+        val token = "c" + UUID.randomUUID().toString().replace("-", "")
+        confirmationToken = token
+        confirmationFingerprint = fingerprint(action, target, text)
+        confirmationCreatedAt = System.currentTimeMillis()
+        return token
+    }
+
+    private fun hasValidConfirmation(action: String, target: String, text: String, supplied: String): Boolean {
+        val valid = supplied.isNotBlank() && supplied == confirmationToken &&
+            confirmationFingerprint == fingerprint(action, target, text) &&
+            System.currentTimeMillis() - confirmationCreatedAt <= 60_000L
+        if (valid) {
+            confirmationToken = null
+            confirmationFingerprint = null
+            confirmationCreatedAt = 0L
+        }
+        return valid
+    }
+
+    private fun fingerprint(action: String, target: String, text: String): String =
+        listOf(action, target, text).joinToString("\u0000").lowercase(Locale.ROOT)
 
     private fun performVisualTap(cell: String, suppliedToken: String): Pair<Boolean, String> {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
@@ -254,6 +300,184 @@ class JarvisAccessibilityService : AccessibilityService() {
         } else false to "The visible area could not be scrolled."
     }
 
+    private fun longPressRef(node: AccessibilityNodeInfo, label: String): Pair<Boolean, String> {
+        val target = if (node.isLongClickable) node else longClickableAncestor(node)
+            ?: return false to "Element does not support long press."
+        val bounds = Rect()
+        target.getBoundsInScreen(bounds)
+        return dispatchLongPressGesture(bounds.centerX().toFloat(), bounds.centerY().toFloat(), "Long-pressed '$label'.")
+    }
+
+    private fun swipeElement(node: AccessibilityNodeInfo, direction: String, label: String): Pair<Boolean, String> {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        val startX: Float
+        val startY: Float
+        val endX: Float
+        val endY: Float
+        when (direction) {
+            "swipe_left" -> {
+                startX = bounds.right.toFloat()
+                startY = bounds.centerY().toFloat()
+                endX = bounds.left.toFloat()
+                endY = bounds.centerY().toFloat()
+            }
+            "swipe_right" -> {
+                startX = bounds.left.toFloat()
+                startY = bounds.centerY().toFloat()
+                endX = bounds.right.toFloat()
+                endY = bounds.centerY().toFloat()
+            }
+            "swipe_up" -> {
+                startX = bounds.centerX().toFloat()
+                startY = bounds.bottom.toFloat()
+                endX = bounds.centerX().toFloat()
+                endY = bounds.top.toFloat()
+            }
+            "swipe_down" -> {
+                startX = bounds.centerX().toFloat()
+                startY = bounds.top.toFloat()
+                endX = bounds.centerX().toFloat()
+                endY = bounds.bottom.toFloat()
+            }
+            else -> return false to "Invalid swipe direction"
+        }
+        return dispatchSwipeGesture(startX, startY, endX, endY, "Swiped $direction on '$label'.")
+    }
+
+    private fun dragElement(node: AccessibilityNodeInfo, targetX: Float, targetY: Float, label: String): Pair<Boolean, String> {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        val startX = bounds.centerX().toFloat()
+        val startY = bounds.centerY().toFloat()
+        return dispatchDragGesture(startX, startY, targetX, targetY, "Dragged '$label'.")
+    }
+
+    private fun doubleTapRef(node: AccessibilityNodeInfo, label: String): Pair<Boolean, String> {
+        val clickable = if (node.isClickable) node else clickableAncestor(node)
+            ?: return false to "Element not clickable for double tap."
+        val bounds = Rect()
+        clickable.getBoundsInScreen(bounds)
+        return dispatchDoubleTapGesture(bounds.centerX().toFloat(), bounds.centerY().toFloat(), "Double-tapped '$label'.")
+    }
+
+    private fun pinchZoom(node: AccessibilityNodeInfo, action: String, label: String): Pair<Boolean, String> {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        val centerX = bounds.centerX().toFloat()
+        val centerY = bounds.centerY().toFloat()
+        val radius = min(bounds.width(), bounds.height()) / 4f
+        return if (action == "pinch_in") {
+            dispatchPinchGesture(centerX, centerY, radius, true, "Pinched in on '$label'.")
+        } else {
+            dispatchPinchGesture(centerX, centerY, radius, false, "Pinched out on '$label'.")
+        }
+    }
+
+    private fun dispatchSwipeGesture(startX: Float, startY: Float, endX: Float, endY: Float, description: String): Pair<Boolean, String> {
+        val path = Path().apply {
+            moveTo(startX, startY)
+            lineTo(endX, endY)
+        }
+        val duration = calculateSwipeDuration(startX, startY, endX, endY)
+        val stroke = GestureDescription.StrokeDescription(path, 0, duration)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val accepted = dispatchGesture(gesture, null, null)
+        return if (accepted) true to description else false to "Swipe gesture rejected."
+    }
+
+    private fun dispatchDragGesture(startX: Float, startY: Float, endX: Float, endY: Float, description: String): Pair<Boolean, String> {
+        val path = Path().apply {
+            moveTo(startX, startY)
+            lineTo((startX + endX) / 2, (startY + endY) / 2)
+            lineTo(endX, endY)
+        }
+        val duration = calculateDragDuration(startX, startY, endX, endY)
+        val stroke = GestureDescription.StrokeDescription(path, 0, duration)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val accepted = dispatchGesture(gesture, null, null)
+        return if (accepted) true to description else false to "Drag gesture rejected."
+    }
+
+    private fun dispatchLongPressGesture(x: Float, y: Float, description: String): Pair<Boolean, String> {
+        val path = Path().apply { moveTo(x, y) }
+        val duration = ViewConfiguration.getLongPressTimeout().toLong()
+        val stroke = GestureDescription.StrokeDescription(path, 0, duration)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val accepted = dispatchGesture(gesture, null, null)
+        return if (accepted) true to description else false to "Long press gesture rejected."
+    }
+
+    private fun dispatchDoubleTapGesture(x: Float, y: Float, description: String): Pair<Boolean, String> {
+        val path = Path().apply { moveTo(x, y) }
+        val tapDuration = ViewConfiguration.getTapTimeout().toLong()
+        val doubleTapInterval = ViewConfiguration.getDoubleTapTimeout().toLong()
+        val stroke1 = GestureDescription.StrokeDescription(path, 0, tapDuration)
+        val stroke2 = GestureDescription.StrokeDescription(path, doubleTapInterval, tapDuration)
+        val gesture = GestureDescription.Builder().addStroke(stroke1).addStroke(stroke2).build()
+        val accepted = dispatchGesture(gesture, null, null)
+        return if (accepted) true to description else false to "Double tap gesture rejected."
+    }
+
+    private fun dispatchPinchGesture(centerX: Float, centerY: Float, radius: Float, pinchIn: Boolean, description: String): Pair<Boolean, String> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return false to "Multi-touch gestures require Android 7.0+"
+        }
+        val start1X: Float
+        val start1Y: Float
+        val end1X: Float
+        val end1Y: Float
+        val start2X: Float
+        val start2Y: Float
+        val end2X: Float
+        val end2Y: Float
+        if (pinchIn) {
+            start1X = centerX - radius
+            start1Y = centerY
+            end1X = centerX - radius / 2
+            end1Y = centerY
+            start2X = centerX + radius
+            start2Y = centerY
+            end2X = centerX + radius / 2
+            end2Y = centerY
+        } else {
+            start1X = centerX - radius / 2
+            start1Y = centerY
+            end1X = centerX - radius
+            end1Y = centerY
+            start2X = centerX + radius / 2
+            start2Y = centerY
+            end2X = centerX + radius
+            end2Y = centerY
+        }
+        val path1 = Path().apply { moveTo(start1X, start1Y); lineTo(end1X, end1Y) }
+        val path2 = Path().apply { moveTo(start2X, start2Y); lineTo(end2X, end2Y) }
+        val stroke1 = GestureDescription.StrokeDescription(path1, 0, 500, true)
+        val stroke2 = stroke1.continueStroke(path2, 0, 500, false)
+        val gesture = GestureDescription.Builder().addStroke(stroke1).addStroke(stroke2).build()
+        val accepted = dispatchGesture(gesture, null, null)
+        return if (accepted) true to description else false to "Pinch gesture rejected."
+    }
+
+    private fun calculateSwipeDuration(x1: Float, y1: Float, x2: Float, y2: Float): Long {
+        val distance = sqrt((x1 - x2).pow(2) + (y1 - y2).pow(2))
+        return (distance / 2f).coerceIn(200f, 800f).toLong()
+    }
+
+    private fun calculateDragDuration(x1: Float, y1: Float, x2: Float, y2: Float): Long {
+        val distance = sqrt((x1 - x2).pow(2) + (y1 - y2).pow(2))
+        return (distance / 1.5f).coerceIn(300f, 1500f).toLong()
+    }
+
+    private fun longClickableAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var parent = node.parent
+        while (parent != null) {
+            if (parent.isLongClickable) return parent
+            parent = parent.parent
+        }
+        return null
+    }
+
     private fun globalAction(action: Int, successMessage: String): Pair<Boolean, String> =
         if (performGlobalAction(action)) true to successMessage
         else false to "Android rejected that navigation action."
@@ -300,6 +524,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         val executor = Executors.newSingleThreadExecutor()
         val latch = CountDownLatch(1)
         var result: VisualCapture? = null
+        var captureError: String? = null
         try {
             takeScreenshot(
                 Display.DEFAULT_DISPLAY,
@@ -340,6 +565,15 @@ class JarvisAccessibilityService : AccessibilityService() {
                     }
 
                     override fun onFailure(errorCode: Int) {
+                        captureError = when (errorCode) {
+                            ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR -> "Internal error during screenshot capture"
+                            ERROR_TAKE_SCREENSHOT_NO_ACCESSIBILITY_ACCESS -> "Accessibility access lost. Re-enable MARK in Accessibility settings."
+                            ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT -> "Rate limited. Wait 1 second before retrying."
+                            ERROR_TAKE_SCREENSHOT_INVALID_DISPLAY -> "Invalid display ID"
+                            ERROR_TAKE_SCREENSHOT_INVALID_WINDOW -> "Invalid window ID"
+                            ERROR_TAKE_SCREENSHOT_SECURE_WINDOW -> "Secure window (banking/auth) - screenshots blocked by system"
+                            else -> "Unknown screenshot error: $errorCode"
+                        }
                         latch.countDown()
                     }
                 }
@@ -349,6 +583,9 @@ class JarvisAccessibilityService : AccessibilityService() {
             return false to null
         } finally {
             executor.shutdownNow()
+        }
+        if (captureError != null) {
+            return false to null
         }
         return (result != null) to result
     }
@@ -397,9 +634,13 @@ class JarvisAccessibilityService : AccessibilityService() {
             snapshotTruncated = true
             return
         }
-        val text = node.text?.toString()?.trim().orEmpty()
-        val description = node.contentDescription?.toString()?.trim().orEmpty()
+        val rawText = node.text?.toString()?.trim().orEmpty()
+        val rawDescription = node.contentDescription?.toString()?.trim().orEmpty()
         val role = node.className?.toString()?.substringAfterLast('.') ?: "node"
+        val sensitiveNode = node.isPassword || role.contains("password", ignoreCase = true) ||
+            rawDescription.contains("otp", ignoreCase = true) || rawDescription.contains("pin", ignoreCase = true)
+        val text = if (node.isEditable || sensitiveNode) "" else rawText
+        val description = rawDescription.take(160)
         val actionable = node.isClickable || node.isEditable || node.isScrollable || node.actionList.isNotEmpty()
         val visible = node.isVisibleToUser || actionable
         val nativeId = node.viewIdResourceName?.takeIf { it.isNotBlank() }
@@ -459,13 +700,13 @@ class JarvisAccessibilityService : AccessibilityService() {
 
         fun walk(node: AccessibilityNodeInfo, depth: Int) {
             if (depth > 20 || matches.size > 1) return
-            val text = node.text?.toString()?.trim().orEmpty()
-            val description = node.contentDescription?.toString()?.trim().orEmpty()
+            val rawText = node.text?.toString()?.trim().orEmpty()
+            val description = node.contentDescription?.toString()?.trim().orEmpty().take(160)
             val role = node.className?.toString()?.substringAfterLast('.') ?: "node"
             val actionable = node.isClickable || node.isEditable || node.isScrollable || node.actionList.isNotEmpty()
             val visible = node.isVisibleToUser || actionable
             val nativeId = node.viewIdResourceName?.takeIf { it.isNotBlank() }
-            val label = text.ifBlank { description }
+            val label = if (node.isEditable || node.isPassword) "" else rawText.ifBlank { description }
             val identityMatches = visible && actionable && role == entry.role &&
                 label == entry.label && description == entry.description &&
                 (entry.nativeId == null || nativeId == entry.nativeId)

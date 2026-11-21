@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.content.pm.ServiceInfo
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import java.util.concurrent.atomic.AtomicBoolean
@@ -35,15 +36,9 @@ class JarvisVoiceForegroundService : Service() {
         }
 
         fun stop(context: android.content.Context) {
-            // Deliver an explicit stop command first so AudioRecord, AudioTrack,
-            // the WebSocket, and the foreground notification are released from
-            // onStartCommand instead of waiting for a delayed onDestroy callback.
-            val intent = Intent(context, JarvisVoiceForegroundService::class.java)
-                .setAction(ACTION_STOP)
-            runCatching { context.startService(intent) }
-                .onFailure {
-                    context.stopService(Intent(context, JarvisVoiceForegroundService::class.java))
-                }
+            // Stop the running service directly. Sending a second startService
+            // command can leave the foreground notification alive on some devices.
+            context.stopService(Intent(context, JarvisVoiceForegroundService::class.java))
         }
     }
 
@@ -68,16 +63,26 @@ class JarvisVoiceForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
-            when (intent?.action) {
+            // START_STICKY services can be recreated with a null intent. Treat that
+            // case as a voice restart so a temporary process/service interruption
+            // does not leave the notification visible but MARK silent.
+            when (intent?.action ?: ACTION_START) {
                 ACTION_STOP -> {
+                    // Mark the service stopped before callbacks are delivered. This prevents
+                    // the manager's final status callback from trying to update a removed
+                    // foreground notification during service destruction.
                     isRunning = false
-                    voiceManager?.stopListening()
                     stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf(startId)
+                    stopSelf()
                 }
 
                 ACTION_START -> {
-                    startForeground(NOTIFICATION_ID, buildNotification("Starting MARK voice listening"))
+                    val notification = buildNotification("Starting MARK voice listening")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+                    } else {
+                        startForeground(NOTIFICATION_ID, notification)
+                    }
                     if (!isRunning) {
                         isRunning = true
                         sendStatus("CONNECTING TO MARK LIVE...")
@@ -92,7 +97,7 @@ class JarvisVoiceForegroundService : Service() {
             isRunning = false
             stopSelf()
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     override fun onDestroy() {
@@ -114,8 +119,7 @@ class JarvisVoiceForegroundService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        isRunning = false
-        stopSelf()
+        // Keep MARK voice alive when the launcher task is removed or another app is opened.
         super.onTaskRemoved(rootIntent)
     }
 

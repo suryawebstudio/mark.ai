@@ -1,0 +1,117 @@
+{
+  "packageName": "com.google.android.youtube",
+  "appName": "YouTube",
+  "versionCode": 19000000,
+  "versionName": "19.00.00",
+  "launcherActivity": "com.google.android.apps.youtube.app.application.Shell_HomeActivity",
+  "mainActivities": ["com.google.android.apps.youtube.app.application.Shell_HomeActivity", "com.google.android.apps.youtube.app.WatchActivity"],
+  "accessibilityLevel": "FULL",
+  "keyElements": {
+    "home_container": {
+      "role": "RecyclerView",
+      "resourceIds": ["results"],
+      "actionTypes": ["scroll"]
+    },
+    "search_button": {
+      "role": "Button",
+      "descriptionPatterns": ["Search"],
+      "resourceIds": ["menu_search"],
+      "actionTypes": ["click"]
+    },
+    "search_field": {
+      "role": "EditText",
+      "resourceIds": ["search_edit_text"],
+      "actionTypes": ["type"]
+    },
+    "video_item": {
+      "role": "View",
+      "resourceIds": ["event_item"],
+      "actionTypes": ["click"]
+    },
+    "video_player": {
+      "role": "View",
+      "resourceIds": ["watch_player"],
+      "actionTypes": ["click", "swipe"]
+    },
+    "play_pause_button": {
+      "role": "Button",
+      "resourceIds": ["player_control_play_pause_replay_button"],
+      "descriptionPatterns": ["Play", "Pause"],
+      "actionTypes": ["click"]
+    },
+    "fullscreen_button": {
+      "role": "Button",
+      "descriptionPatterns": ["Enter fullscreen", "Exit fullscreen"],
+      "actionTypes": ["click"]
+    },
+    "quality_button": {
+      "role": "Button",
+      "resourceIds": ["quality_button"],
+      "actionTypes": ["click"]
+    },
+    "subscribe_button": {
+      "role": "Button",
+      "descriptionPatterns": ["Subscribe"],
+      "actionTypes": ["click"]
+    },
+    "like_button": {
+      "role": "Button",
+      "descriptionPatterns": ["Like"],
+      "actionTypes": ["click"]
+    },
+    "home_tab": {
+      "role": "Tab",
+      "descriptionPatterns": ["Home"],
+      "actionTypes": ["click"]
+    },
+    "shorts_tab": {
+      "role": "Tab",
+      "descriptionPatterns": ["Shorts"],
+      "actionTypes": ["click"]
+    },
+    "subscriptions_tab": {
+      "role": "Tab",
+      "descriptionPatterns": ["Subscriptions"],
+      "actionTypes": ["click"]
+    },
+    "library_tab": {
+      "role": "Tab",
+      "descriptionPatterns": ["Library"],
+      "actionTypes": ["click"]
+    }
+  },
+  "navigationPatterns": {},
+  "workflows": {
+    "search_play_video": {
+      "name": "search_play_video",
+      "description": "Search for and play a video",
+      "triggers": ["search", "play", "video", "youtube"],
+      "startScreen": "home",
+      "steps": [
+        { "action": "tap", "targetRole": "search_button", "verification": { "type": "element_present", "params": { "targetRole": "search_field" } } },
+        { "action": "type", "targetRole": "search_field", "params": { "text": "{{query}}" }, "verification": { "type": "element_present", "params": { "targetRole": "video_item" } } },
+        { "action": "tap", "targetRole": "video_item", "verification": { "type": "element_present", "params": { "targetRole": "video_player" } } }
+      ]
+    },
+    "play_pause_video": {
+      "name": "play_pause_video",
+      "description": "Play or pause the current video",
+      "triggers": ["play", "pause", "video"],
+      "startScreen": "watch",
+      "steps": [
+        { "action": "tap", "targetRole": "play_pause_button", "verification": { "type": "state_changed", "params": { "targetRole": "play_pause_button", "expectedState": "checked" } } }
+      ]
+    },
+    "open_subscriptions": {
+      "name": "open_subscriptions",
+      "description": "Open subscriptions tab",
+      "triggers": ["subscription", "channel"],
+      "steps": [
+        { "action": "tap", "targetRole": "subscriptions_tab", "verification": { "type": "element_present", "params": { "targetRole": "home_container" } } }
+      ]
+    }
+  },
+  "commonDialogs": [],
+  "intents": {},
+  "deepLinks": {}
+}

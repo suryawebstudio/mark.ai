@@ -5,7 +5,7 @@
 buildscript {
     repositories {
         google()
-        mavenCentral()
+        maven { url = uri("https://maven-central.storage-download.googleapis.com/maven2") }
     }
     dependencies {
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.21")

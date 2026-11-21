@@ -3,6 +3,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -40,6 +41,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.Locale
+import kotlinx.coroutines.runBlocking
+import com.surya.jarvis.ocr.OcrProcessor
 
 class LiveVoiceManager(
     private val context: Context,
@@ -105,10 +108,10 @@ class LiveVoiceManager(
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        .pingInterval(20, TimeUnit.SECONDS)
         .build()
 
     private val running = AtomicBoolean(false)
-    private val reconnectScheduled = AtomicBoolean(false)
     // The service can call stop(), onTaskRemoved(), and release() close together.
     // Only the first shutdown is allowed to release the audio/WebSocket resources.
     private val stopped = AtomicBoolean(true)
@@ -125,13 +128,14 @@ class LiveVoiceManager(
 
     private val fileManager = JarvisFileManager(context.applicationContext)
     private val memoryStore = JarvisMemoryStore(context.applicationContext)
+    private val ocrProcessor = OcrProcessor(context.applicationContext)
 
     @Volatile
     private var setupComplete = false
-    @Volatile
-    private var sessionResumptionHandle: String? = null
 
     private var webSocket: WebSocket? = null
+    private var reconnectAttempt = 0
+    private var reconnectGeneration = 0L
     private var audioRecord: AudioRecord? = null
     @Volatile
     private var audioTrack: AudioTrack? = null
@@ -167,57 +171,49 @@ class LiveVoiceManager(
         }
 
         setupComplete = false
-        status("REQUESTING TEMPORARY TOKEN...")
-
-        connectToLive()
+        reconnectAttempt = 0
+        reconnectGeneration += 1
+        requestConnection()
     }
 
-    private fun connectToLive() {
-        Thread {
+    private fun requestConnection() {
+        if (!running.get() || stopped.get()) return
+        status(if (reconnectAttempt == 0) "REQUESTING TEMPORARY TOKEN..." else "RECONNECTING TO MARK LIVE...")
+        try { webSocket?.cancel() } catch (_: Exception) {}
+        Thread({
             try {
                 val tokenRequest = Request.Builder()
                     .url("$WORKER_URL/live-token")
                     .post("{}".toRequestBody())
                     .build()
-
                 val response = client.newCall(tokenRequest).execute()
-
-                val responseBody =
-                    response.body?.string().orEmpty()
-
-                if (!response.isSuccessful) {
-                    throw IOException(
-                        "Token HTTP ${response.code}: $responseBody"
-                    )
-                }
-
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) throw IOException("Token HTTP ${response.code}: $responseBody")
                 val json = JSONObject(responseBody)
-
-                val token = json.optString("token")
-                    .ifBlank { json.optString("name") }
-
-                if (token.isBlank()) {
-                    throw IOException(
-                        "Temporary token missing: $responseBody"
-                    )
-                }
-
-                if (!running.get()) return@Thread
-
+                val token = json.optString("token").ifBlank { json.optString("name") }
+                if (token.isBlank()) throw IOException("Temporary token missing: $responseBody")
+                if (!running.get() || stopped.get()) return@Thread
                 val request = Request.Builder()
                     .url(LIVE_URL)
                     .header("Authorization", "Token $token")
                     .build()
-
-                webSocket = client.newWebSocket(
-                    request,
-                    liveListener
-                )
-
+                webSocket = client.newWebSocket(request, liveListener)
             } catch (e: Exception) {
-                fail("TOKEN ERROR: ${e.message}")
+                scheduleReconnect("TOKEN ERROR: ${e.message.orEmpty()}")
             }
-        }.start()
+        }, "MARK-Voice-Connect").apply { isDaemon = true }.start()
+    }
+
+    private fun scheduleReconnect(reason: String) {
+        if (!running.get() || stopped.get()) return
+        setupComplete = false
+        reconnectAttempt = (reconnectAttempt + 1).coerceAtMost(8)
+        val delayMs = (1_000L * (1L shl (reconnectAttempt - 1))).coerceAtMost(30_000L)
+        val generation = ++reconnectGeneration
+        status("$reason — RECONNECTING IN ${delayMs / 1000}s")
+        mainHandler.postDelayed({
+            if (generation == reconnectGeneration && running.get() && !stopped.get()) requestConnection()
+        }, delayMs)
     }
 
     private val liveListener = object : WebSocketListener() {
@@ -274,14 +270,7 @@ class LiveVoiceManager(
                             }
                         )
 
-                        put(
-                            "sessionResumption",
-                            JSONObject().apply {
-                                sessionResumptionHandle
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?.let { put("handle", it) }
-                            }
-                        )
+                        put("sessionResumption", JSONObject())
                         put("tools", phoneControlTools())
                     }
                 )
@@ -330,26 +319,12 @@ class LiveVoiceManager(
                 val json = JSONObject(text)
 
                 if (json.has("error")) {
-                    fail("LIVE SERVICE ERROR — PLEASE TRY AGAIN")
-                    return
-                }
-
-                json.optJSONObject("sessionResumptionUpdate")?.let { update ->
-                    val handle = listOf("newHandle", "handle", "token")
-                        .asSequence()
-                        .map { update.optString(it) }
-                        .firstOrNull { it.isNotBlank() }
-                    if (update.optBoolean("resumable", false) && handle != null) {
-                        sessionResumptionHandle = handle
-                    }
-                }
-
-                if (json.has("goAway")) {
-                    scheduleReconnect(250L)
+                    scheduleReconnect("LIVE SERVICE ERROR")
                     return
                 }
 
                 if (json.has("setupComplete")) {
+                    reconnectAttempt = 0
                     setupComplete = true
                     status("MARK LIVE — LISTENING")
                     startPlayback()
@@ -408,7 +383,7 @@ class LiveVoiceManager(
                 "HTTP ${it.code}: ${it.message}"
             } ?: t.message
 
-            scheduleReconnect(1_000L, "WEBSOCKET RECONNECTING: $details")
+            scheduleReconnect("WEBSOCKET ERROR: ${details.orEmpty()}")
         }
 
         override fun onClosed(
@@ -419,244 +394,218 @@ class LiveVoiceManager(
             setupComplete = false
 
             if (running.get()) {
-                scheduleReconnect(1_000L, "SESSION RECONNECTING: $code $reason")
+                scheduleReconnect("SESSION CLOSED: $code $reason")
             }
-        }
-    }
-
-    private fun scheduleReconnect(
-        delayMs: Long,
-        message: String = "RECONNECTING TO MARK LIVE..."
-    ) {
-        if (!running.get() || stopped.get()) return
-        if (!reconnectScheduled.compareAndSet(false, true)) return
-
-        status(message)
-        Thread {
-            try {
-                Thread.sleep(delayMs)
-                if (!running.get() || stopped.get()) return@Thread
-
-                setupComplete = false
-                recorderThread?.interrupt()
-                runCatching { audioRecord?.stop() }
-                runCatching { audioRecord?.release() }
-                audioRecord = null
-                recorderThread = null
-
-                playbackGeneration.incrementAndGet()
-                playbackQueue.clear()
-                playbackThread?.interrupt()
-                playbackThread = null
-                runCatching { audioTrack?.pause() }
-                runCatching { audioTrack?.flush() }
-                runCatching { audioTrack?.release() }
-                audioTrack = null
-                runCatching { echoCanceler?.release() }
-                runCatching { noiseSuppressor?.release() }
-                echoCanceler = null
-                noiseSuppressor = null
-
-                runCatching { webSocket?.cancel() }
-                webSocket = null
-                reconnectScheduled.set(false)
-                connectToLive()
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                reconnectScheduled.set(false)
-            } catch (_: Exception) {
-                reconnectScheduled.set(false)
-                if (running.get() && !stopped.get()) {
-                    scheduleReconnect(2_000L)
-                }
-            }
-        }.apply {
-            isDaemon = true
-            start()
         }
     }
 
     private fun phoneControlTools(): JSONArray {
-        val launchApp = JSONObject().apply {
-            put("name", "launch_app")
-            put(
-                "description",
-                "Open an installed Android app by its visible app name. Only launch the app; do not perform actions inside it."
-            )
-            put(
-                "parameters",
-                JSONObject().apply {
-                    put("type", "OBJECT")
-                    put(
-                        "properties",
-                        JSONObject().put(
-                            "app_name",
-                            JSONObject()
-                                .put("type", "STRING")
-                                .put("description", "The installed app's visible name, such as Chrome or Maps.")
-                        )
-                    )
-                    put("required", JSONArray().put("app_name"))
-                }
-            )
-        }
-
-        val openSettings = JSONObject().apply {
-            put("name", "open_settings_page")
-            put(
-                "description",
-                "Open one of the supported Android Settings screens or a system control panel. For Wi-Fi, use the Android Wi-Fi panel when available; for Bluetooth, open Bluetooth Settings. Android may require the user to tap protected switches, unless the visible switch can be controlled through enabled MARK Accessibility. Never claim a setting changed without confirmation."
-            )
-            put(
-                "parameters",
-                JSONObject().apply {
-                    put("type", "OBJECT")
-                    put(
-                        "properties",
-                        JSONObject().put(
-                            "page",
-                            JSONObject()
-                                .put("type", "STRING")
-                                .put("enum", JSONArray().put("general").put("quick_settings").put("wireless").put("wifi").put("bluetooth").put("nfc").put("display").put("sound").put("notifications").put("apps").put("battery").put("battery_saver").put("location").put("security").put("privacy").put("accessibility").put("date_time").put("keyboard").put("storage").put("vpn").put("cast").put("home"))
-                                .put("description", "Open a system page. Supported values include general, quick_settings, wireless, wifi, bluetooth, nfc, display, sound, notifications, apps, battery, battery_saver, location, security, privacy, accessibility, date_time, keyboard, storage, vpn, cast, or home. Android may require the user to make protected changes manually.")
-                        )
-                    )
-                    put("required", JSONArray().put("page"))
-                }
-            )
-        }
-
-        val inspectScreen = JSONObject().apply {
-            put("name", "inspect_visible_screen")
-            put(
-                "description",
-                "Read the accessible tree, labels, states, and actions currently visible on the foreground screen. The response includes snapshot_id, complete, and refs for actionable elements. The tool envelope also reports status, verified, retryable, and task_state. Use this before interacting when the target is unclear."
-            )
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val inspectVisualScreen = JSONObject().apply {
-            put("name", "inspect_visual_screen")
-            put("description", "Capture one current screenshot of the visible phone screen and send it to the active vision session with an 8-column by 12-row grid. Use only when inspect_visible_screen is incomplete or cannot expose a visible custom-drawn control. This is not continuous capture and does not bypass Android security screens. Requires Android 11+ and enabled MARK Accessibility.")
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val setFlashlight = JSONObject().apply {
-            put("name", "set_flashlight")
-            put("description", "Turn the phone flashlight on or off. This uses Android's flashlight API and requires the user to grant camera permission; no camera preview is opened.")
-            put("parameters", JSONObject().apply {
-                put("type", "OBJECT")
-                put("properties", JSONObject().put("enabled", JSONObject().put("type", "BOOLEAN").put("description", "True to turn the flashlight on, false to turn it off.")))
-                put("required", JSONArray().put("enabled"))
-            })
-        }
-
-        val captureCameraImage = JSONObject().apply {
-            put("name", "capture_camera_image")
-            put(
-                "description",
-                "Capture one still image from the rear camera and send it to the active MARK vision session. Use only after the user explicitly asks what the camera sees. This never starts continuous recording and requires camera permission."
-            )
-            put("parameters", JSONObject().apply {
-                put("type", "OBJECT")
-                put("properties", JSONObject())
-            })
-        }
-
-        val controlScreen = JSONObject().apply {
-            put("name", "control_visible_screen")
-            put(
-                "description",
-                "Perform one narrow action on the current visible screen: tap a semantic control, type into a visible text field, scroll, use Back, Home, or recent apps, or perform one guarded visual_tap on a custom-drawn target. Accessibility must be enabled by the user. For tap, type, and scroll, use the exact snapshot_id and ref returned by the latest inspect_visible_screen; stale refs are rejected. For visual_tap, use only the exact grid cell and grounding_token returned by the latest inspect_visual_screen; visual taps are single-use and repeated same-area coordinates are rejected until a fresh visual inspection."
-            )
-            put(
-                "parameters",
-                JSONObject().apply {
-                    put("type", "OBJECT")
-                    put(
-                        "properties",
-                        JSONObject()
-                            .put("action", JSONObject().put("type", "STRING").put("enum", JSONArray().put("tap").put("visual_tap").put("type").put("scroll").put("back").put("home").put("overview")))
-                            .put("snapshot_id", JSONObject().put("type", "STRING").put("description", "The snapshot_id returned by the latest inspect_visible_screen. Required for tap, type, and scroll."))
-                            .put("ref", JSONObject().put("type", "STRING").put("description", "The exact ref returned by the latest inspect_visible_screen, such as @a1abc123:e1. Required for tap, type, and scroll."))
-                            .put("target", JSONObject().put("type", "STRING").put("description", "Optional human-readable label used for confirmation context; do not use it to guess a target."))
-                            .put("text", JSONObject().put("type", "STRING").put("description", "Text to type when action is type."))
-                            .put("direction", JSONObject().put("type", "STRING").put("enum", JSONArray().put("up").put("down")))
-                            .put("visual_cell", JSONObject().put("type", "STRING").put("description", "For visual_tap only: exact grid cell such as C7 from the latest visual inspection."))
-                            .put("visual_token", JSONObject().put("type", "STRING").put("description", "For visual_tap only: exact short-lived grounding_token from the latest inspect_visual_screen result."))
-                            .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
-                    )
-                    put("required", JSONArray().put("action"))
-                }
-            )
-        }
-
-        val cancelTask = JSONObject().apply {
-            put("name", "cancel_task")
-            put("description", "Stop the current multi-step MARK task and clear its task state. Use when the user says stop, cancel, or abort.")
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val completeTask = JSONObject().apply {
-            put("name", "complete_task")
-            put("description", "Mark the current task complete only after the requested outcome has been verified. Do not use this after an unverified or failed action.")
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val startTask = JSONObject().apply {
-            put("name", "start_task")
-            put("description", "Start or reset a new multi-step MARK task before executing a complex user request.")
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val listFiles = JSONObject().apply {
-            put("name", "list_files")
-            put("description", "List files and folders in shared storage. Full storage access must be enabled by the user.")
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
-        val createTextFile = JSONObject().apply {
-            put("name", "create_text_file")
-            put("description", "Create a new UTF-8 text file in shared storage. Full storage access must be enabled by the user.")
-            put("parameters", JSONObject().apply {
-                put("type", "OBJECT")
-                put("properties", JSONObject()
-                    .put("name", JSONObject().put("type", "STRING").put("description", "File name only, without folders."))
-                    .put("content", JSONObject().put("type", "STRING").put("description", "Complete text content.")))
-                put("required", JSONArray().put("name").put("content"))
-            })
-        }
-
-        val editTextFile = JSONObject().apply {
-            put("name", "edit_text_file")
-            put("description", "Replace the complete UTF-8 text content of an existing shared-storage file. Full storage access must be enabled by the user.")
-            put("parameters", JSONObject().apply {
-                put("type", "OBJECT")
-                put("properties", JSONObject()
-                    .put("name", JSONObject().put("type", "STRING").put("description", "Existing file name only, without folders."))
-                    .put("content", JSONObject().put("type", "STRING").put("description", "New complete text content.")))
-                put("required", JSONArray().put("name").put("content"))
-            })
-        }
-
-        val deleteFile = JSONObject().apply {
-            put("name", "delete_file")
-            put("description", "Permanently delete one file or folder from shared storage. Full storage access must be enabled by the user. Always ask the user to confirm aloud before calling this with confirmed=true.")
-            put("parameters", JSONObject().apply {
-                put("type", "OBJECT")
-                put("properties", JSONObject()
-                    .put("name", JSONObject().put("type", "STRING").put("description", "Exact file or folder name only, without folders."))
-                    .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "True only after the user explicitly confirms the exact deletion.")))
-                put("required", JSONArray().put("name").put("confirmed"))
-            })
-        }
+        val functionDeclarations = JSONArray()
+            .put(buildLaunchAppTool())
+            .put(buildOpenSettingsTool())
+            .put(buildSetFlashlightTool())
+            .put(buildCaptureCameraImageTool())
+            .put(buildInspectScreenTool())
+            .put(buildInspectVisualScreenTool())
+            .put(buildVisualTapTool())
+            .put(buildControlScreenTool())
+            .put(buildStartTaskTool())
+            .put(buildCancelTaskTool())
+            .put(buildCompleteTaskTool())
+            .put(buildListFilesTool())
+            .put(buildCreateTextFileTool())
+            .put(buildEditTextFileTool())
+            .put(buildDeleteFileTool())
 
         return JSONArray().put(
-            JSONObject().put(
-                "functionDeclarations",
-                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(captureCameraImage).put(inspectScreen).put(inspectVisualScreen).put(controlScreen).put(startTask).put(cancelTask).put(completeTask).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
-            )
+            JSONObject().put("functionDeclarations", functionDeclarations)
         )
+    }
+
+    private fun buildLaunchAppTool(): JSONObject = JSONObject().apply {
+        put("name", "launch_app")
+        put(
+            "description",
+            "Open an installed Android app by its visible app name. Only launch the app; do not perform actions inside it."
+        )
+        put(
+            "parameters",
+            JSONObject().apply {
+                put("type", "OBJECT")
+                put(
+                    "properties",
+                    JSONObject().put(
+                        "app_name",
+                        JSONObject()
+                            .put("type", "STRING")
+                            .put("description", "The installed app's visible name, such as Chrome or Maps.")
+                    )
+                )
+                put("required", JSONArray().put("app_name"))
+            }
+        )
+    }
+
+    private fun buildOpenSettingsTool(): JSONObject = JSONObject().apply {
+        put("name", "open_settings_page")
+        put(
+            "description",
+            "Open one of the supported Android Settings screens or a system control panel. For Wi-Fi, use the Android Wi-Fi panel when available; for Bluetooth, open Bluetooth Settings. Android may require the user to tap protected switches, unless the visible switch can be controlled through enabled MARK Accessibility. Never claim a setting changed without confirmation."
+        )
+        put(
+            "parameters",
+            JSONObject().apply {
+                put("type", "OBJECT")
+                put(
+                    "properties",
+                    JSONObject().put(
+                        "page",
+                        JSONObject()
+                            .put("type", "STRING")
+                            .put("enum", JSONArray().put("general").put("quick_settings").put("wireless").put("wifi").put("bluetooth").put("nfc").put("display").put("sound").put("notifications").put("apps").put("battery").put("battery_saver").put("location").put("security").put("privacy").put("accessibility").put("date_time").put("keyboard").put("storage").put("vpn").put("cast").put("home"))
+                            .put("description", "Open a system page. Supported values include general, quick_settings, wireless, wifi, bluetooth, nfc, display, sound, notifications, apps, battery, battery_saver, location, security, privacy, accessibility, date_time, keyboard, storage, vpn, cast, or home. Android may require the user to make protected changes manually.")
+                    )
+                )
+                put("required", JSONArray().put("page"))
+            }
+        )
+    }
+
+    private fun buildInspectScreenTool(): JSONObject = JSONObject().apply {
+        put("name", "inspect_visible_screen")
+        put(
+            "description",
+            "Read the accessible tree, labels, states, and actions currently visible on the foreground screen. The response includes snapshot_id, complete, and refs for actionable elements. The tool envelope also reports status, verified, retryable, and task_state. Use this before interacting when the target is unclear."
+        )
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildInspectVisualScreenTool(): JSONObject = JSONObject().apply {
+        put("name", "inspect_visual_screen")
+        put("description", "Capture one current screenshot of the visible phone screen and send it to the active vision session with an 8-column by 12-row grid. Use only when inspect_visible_screen is incomplete or cannot expose a visible custom-drawn control. This is not continuous capture and does not bypass Android security screens. Requires Android 11+ and enabled MARK Accessibility.")
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildVisualTapTool(): JSONObject = JSONObject().apply {
+        put("name", "visual_tap")
+        put("description", "Perform a single visual tap on a grid cell from the latest inspect_visual_screen. Requires Android 11+ and enabled MARK Accessibility. The visual token is single-use and expires in 15 seconds.")
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject()
+                .put("cell", JSONObject().put("type", "STRING").put("description", "Grid cell such as C7 from the latest visual inspection (columns A-H, rows 1-12)."))
+                .put("token", JSONObject().put("type", "STRING").put("description", "The short-lived grounding_token from the latest inspect_visual_screen result."))
+                .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
+            )
+            put("required", JSONArray().put("cell").put("token"))
+        })
+    }
+
+    private fun buildSetFlashlightTool(): JSONObject = JSONObject().apply {
+        put("name", "set_flashlight")
+        put("description", "Turn the phone flashlight on or off. This uses Android's flashlight API and requires the user to grant camera permission; no camera preview is opened.")
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject().put("enabled", JSONObject().put("type", "BOOLEAN").put("description", "True to turn the flashlight on, false to turn it off.")))
+            put("required", JSONArray().put("enabled"))
+        })
+    }
+
+    private fun buildCaptureCameraImageTool(): JSONObject = JSONObject().apply {
+        put("name", "capture_camera_image")
+        put(
+            "description",
+            "Capture one still image from the rear camera and send it to the active MARK vision session. Use only after the user explicitly asks what the camera sees. This never starts continuous recording and requires camera permission."
+        )
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject())
+        })
+    }
+
+    private fun buildControlScreenTool(): JSONObject = JSONObject().apply {
+        put("name", "control_visible_screen")
+        put(
+            "description",
+            "Perform one narrow action on the current visible screen: tap, long press, double tap, swipe, drag, pinch zoom, type into a visible text field, scroll, use Back, Home, or recent apps. Accessibility must be enabled by the user. For tap, long_press, double_tap, type, scroll, swipe, drag, pinch, use the exact snapshot_id and ref returned by the latest inspect_visible_screen; stale refs are rejected."
+        )
+        put(
+            "parameters",
+            JSONObject().apply {
+                put("type", "OBJECT")
+                put(
+                    "properties",
+                    JSONObject()
+                        .put("action", JSONObject().put("type", "STRING").put("enum", JSONArray().put("tap").put("long_press").put("double_tap").put("type").put("scroll").put("swipe_left").put("swipe_right").put("swipe_up").put("swipe_down").put("drag").put("pinch_in").put("pinch_out").put("back").put("home").put("overview")))
+                        .put("snapshot_id", JSONObject().put("type", "STRING").put("description", "The snapshot_id returned by the latest inspect_visible_screen. Required for tap, long_press, double_tap, type, scroll, swipe, drag, pinch."))
+                        .put("ref", JSONObject().put("type", "STRING").put("description", "The exact ref returned by the latest inspect_visible_screen, such as @a1abc123:e1. Required for tap, long_press, double_tap, type, scroll, swipe, drag, pinch."))
+                        .put("target", JSONObject().put("type", "STRING").put("description", "Optional human-readable label used for confirmation context; do not use it to guess a target."))
+                        .put("text", JSONObject().put("type", "STRING").put("description", "Text to type when action is type. For drag, use as targetX. For swipe/drag/pinch, not used."))
+                        .put("direction", JSONObject().put("type", "STRING").put("description", "For scroll: up/down. For swipe: swipe_left/swipe_right/swipe_up/swipe_down. For drag: targetY."))
+                        .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
+                )
+                put("required", JSONArray().put("action"))
+            }
+        )
+    }
+
+    private fun buildCancelTaskTool(): JSONObject = JSONObject().apply {
+        put("name", "cancel_task")
+        put("description", "Stop the current multi-step MARK task and clear its task state. Use when the user says stop, cancel, or abort.")
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildCompleteTaskTool(): JSONObject = JSONObject().apply {
+        put("name", "complete_task")
+        put("description", "Mark the current task complete only after the requested outcome has been verified. Do not use this after an unverified or failed action.")
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildStartTaskTool(): JSONObject = JSONObject().apply {
+        put("name", "start_task")
+        put("description", "Start or reset a new multi-step MARK task before executing a complex user request.")
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildListFilesTool(): JSONObject = JSONObject().apply {
+        put("name", "list_files")
+        put("description", "List files and folders in shared storage. Full storage access must be enabled by the user.")
+        put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+    }
+
+    private fun buildCreateTextFileTool(): JSONObject = JSONObject().apply {
+        put("name", "create_text_file")
+        put("description", "Create a new UTF-8 text file in shared storage. Full storage access must be enabled by the user.")
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject()
+                .put("name", JSONObject().put("type", "STRING").put("description", "File name only, without folders."))
+                .put("content", JSONObject().put("type", "STRING").put("description", "Complete text content.")))
+            put("required", JSONArray().put("name").put("content"))
+        })
+    }
+
+    private fun buildEditTextFileTool(): JSONObject = JSONObject().apply {
+        put("name", "edit_text_file")
+        put("description", "Replace the complete UTF-8 text content of an existing shared-storage file. Full storage access must be enabled by the user.")
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject()
+                .put("name", JSONObject().put("type", "STRING").put("description", "Existing file name only, without folders."))
+                .put("content", JSONObject().put("type", "STRING").put("description", "New complete text content.")))
+            put("required", JSONArray().put("name").put("content"))
+        })
+    }
+
+    private fun buildDeleteFileTool(): JSONObject = JSONObject().apply {
+        put("name", "delete_file")
+        put("description", "Permanently delete one file or folder from shared storage. Full storage access must be enabled by the user. Always ask the user to confirm aloud before calling this with confirmed=true.")
+        put("parameters", JSONObject().apply {
+            put("type", "OBJECT")
+            put("properties", JSONObject()
+                .put("name", JSONObject().put("type", "STRING").put("description", "Exact file or folder name only, without folders."))
+                .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "True only after the user explicitly confirms the exact deletion.")))
+            put("required", JSONArray().put("name").put("confirmed"))
+        })
     }
 
     private fun handlePhoneToolCall(webSocket: WebSocket, toolCall: JSONObject) {
@@ -782,7 +731,12 @@ class LiveVoiceManager(
         taskStepCount += 1
         taskState = TaskState.EXECUTING
         status("TASK STEP $taskStepCount/$MAX_TASK_STEPS")
-        val outcome = executePhoneTool(name, args)
+        val confirmationToken = if (confirmed) {
+            JarvisAccessibilityService.authorizeConfirmation(
+                args.optString("action"), args.optString("target"), args.optString("text")
+            )
+        } else ""
+        val outcome = executePhoneTool(name, args, confirmationToken)
 
         if (outcome.first && confirmed) {
             awaitingTaskConfirmation = false
@@ -818,17 +772,18 @@ class LiveVoiceManager(
     }
 
     private fun isTaskAction(name: String): Boolean =
-        name == "launch_app" || name == "open_settings_page" || name == "set_flashlight" || name == "capture_camera_image" || name == "control_visible_screen" ||
+        name == "launch_app" || name == "open_settings_page" || name == "set_flashlight" || name == "capture_camera_image" || name == "control_visible_screen" || name == "visual_tap" ||
             name == "list_files" || name == "create_text_file" ||
             name == "edit_text_file" || name == "delete_file"
 
     private fun isPotentiallySensitive(name: String, args: JSONObject): Boolean {
         if (name == "delete_file") return true
-        if (name != "control_visible_screen") return false
+        if (name != "control_visible_screen" && name != "visual_tap") return false
         val value = listOf(
             args.optString("action"),
             args.optString("target"),
-            args.optString("text")
+            args.optString("text"),
+            args.optString("cell")
         ).joinToString(" ").lowercase(Locale.ROOT)
         return listOf(
             "send", "submit", "purchase", "buy", "pay", "delete", "remove",
@@ -843,7 +798,7 @@ class LiveVoiceManager(
         taskState = TaskState.IDLE
     }
 
-    private fun executePhoneTool(name: String, args: JSONObject): Pair<Boolean, String> {
+    private fun executePhoneTool(name: String, args: JSONObject, confirmationToken: String = ""): Pair<Boolean, String> {
         return try {
             when (name) {
                 "launch_app" -> launchInstalledApp(args.optString("app_name"))
@@ -851,6 +806,7 @@ class LiveVoiceManager(
                 "set_flashlight" -> setFlashlight(args.optBoolean("enabled", false))
                 "capture_camera_image" -> captureCameraImage()
                 "inspect_visual_screen" -> captureVisualScreen()
+                "visual_tap" -> performVisualTap(args.optString("cell"), args.optString("token"), args.optBoolean("confirmed", false), confirmationToken)
                 "list_files" -> fileManager.listFiles()
                 "create_text_file" -> fileManager.createTextFile(
                     args.optString("name"),
@@ -875,7 +831,8 @@ class LiveVoiceManager(
                     direction = args.optString("direction"),
                     confirmed = args.optBoolean("confirmed", false),
                     visualCell = args.optString("visual_cell"),
-                    visualToken = args.optString("visual_token")
+                    visualToken = args.optString("visual_token"),
+                    confirmationToken = confirmationToken
                 )
                 else -> false to "This phone action is not supported."
             }
@@ -898,12 +855,23 @@ class LiveVoiceManager(
                 "Android denied or could not complete the one-shot screen capture. Try again after the visible screen settles."
             }
         }
+
+        // Decode bitmap for OCR
+        val bitmap = decodeBase64ToBitmap(capture.jpegBase64)
+        val ocrResult = runBlocking { ocrProcessor.recognizeText(bitmap) }
+
+        val ocrText = if (ocrResult.fullText.isNotBlank()) {
+            "\n\nOCR extracted text:\n${ocrResult.fullText}"
+        } else {
+            ""
+        }
+
         val message = JSONObject().apply {
             put("clientContent", JSONObject().apply {
                 put("turns", JSONArray().put(JSONObject().apply {
                     put("role", "user")
                     put("parts", JSONArray()
-                        .put(JSONObject().put("text", "Inspect this single current phone screenshot only as a visual fallback. It includes an 8-column by 12-row grid: columns A-H and rows 1-12. Describe visible custom-drawn controls and their approximate grid cells. Do not infer hidden, protected, or unreadable content, and do not claim that an action was performed."))
+                        .put(JSONObject().put("text", "Inspect this single current phone screenshot only as a visual fallback. It includes an 8-column by 12-row grid: columns A-H and rows 1-12. Describe visible custom-drawn controls and their approximate grid cells. Do not infer hidden, protected, or unreadable content, and do not claim that an action was performed.$ocrText"))
                         .put(JSONObject().put("inlineData", JSONObject()
                             .put("mimeType", "image/jpeg")
                             .put("data", capture.jpegBase64)))
@@ -916,7 +884,31 @@ class LiveVoiceManager(
             return false to "The visual screenshot could not be sent to the live vision session."
         }
         status("VISUAL SCREEN SENT ${capture.width}x${capture.height}")
-        return true to "One visual screen inspection was sent to the live vision session with an 8 by 12 grounding grid. grounding_token=${capture.token}. Use this token only for one clearly visible visual_tap, then inspect again."
+        return true to "One visual screen inspection was sent to the live vision session with an 8 by 12 grounding grid. grounding_token=${capture.token}. OCR blocks: ${ocrResult.blocks.size}. Use this token only for one clearly visible visual_tap, then inspect again."
+    }
+
+    private fun decodeBase64ToBitmap(base64: String): Bitmap {
+        val bytes = Base64.decode(base64, Base64.DEFAULT)
+        return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }
+
+    private fun performVisualTap(cell: String, token: String, confirmed: Boolean, confirmationToken: String = ""): Pair<Boolean, String> {
+        if (!JarvisAccessibilityService.isEnabled()) {
+            return false to "Accessibility control is not enabled. Enable MARK in Android Accessibility settings first."
+        }
+        // Delegate to accessibility service with a dummy ref since visual_tap uses cell+token
+        return JarvisAccessibilityService.control(
+            snapshotId = "visual",
+            ref = "visual_tap",
+            action = "visual_tap",
+            target = cell,
+            text = "",
+            direction = "",
+            confirmed = confirmed,
+            visualCell = cell,
+            visualToken = token,
+            confirmationToken = confirmationToken
+        )
     }
 
     private fun launchInstalledApp(requestedName: String): Pair<Boolean, String> {
@@ -937,6 +929,7 @@ class LiveVoiceManager(
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
             ?: return false to "That app does not provide a launch screen."
 
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         context.startActivity(launchIntent)
         status("OPENING ${match.loadLabel(packageManager).toString().uppercase(Locale.ROOT)}")
         return true to "Opened ${match.loadLabel(packageManager)}."
@@ -1144,6 +1137,10 @@ class LiveVoiceManager(
 
     private fun startAudioCapture() {
         if (!running.get() || !setupComplete) return
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            status("MICROPHONE PERMISSION REQUIRED")
+            return
+        }
 
         try {
             val minBuffer = AudioRecord.getMinBufferSize(
@@ -1266,7 +1263,7 @@ class LiveVoiceManager(
                         }
 
                         if (webSocket?.send(message.toString()) != true) {
-                            fail("AUDIO SEND FAILED")
+                            scheduleReconnect("AUDIO SEND FAILED")
                             break
                         }
                     } else if (count < 0) {
@@ -1439,15 +1436,7 @@ class LiveVoiceManager(
             .getBoolean("voice_responses", true)
 
     private fun fail(message: String) {
-        running.set(false)
-        setupComplete = false
-        clearTaskState()
-        status(message)
-
-        try {
-            webSocket?.close(1000, "Connection error")
-        } catch (_: Exception) {
-        }
+        scheduleReconnect(message)
     }
 
     fun stopListening() {
@@ -1458,6 +1447,8 @@ class LiveVoiceManager(
         if (!stopped.compareAndSet(false, true)) return
         running.set(false)
         setupComplete = false
+        reconnectGeneration += 1
+        mainHandler.removeCallbacksAndMessages(null)
         clearTaskState()
         suppressMicrophone = false
         bargeInSpeechFrames = 0
@@ -1493,6 +1484,11 @@ class LiveVoiceManager(
 
         echoCanceler = null
         noiseSuppressor = null
+
+        try {
+            ocrProcessor.close()
+        } catch (_: Exception) {
+        }
 
         try {
             webSocket?.close(1000, "User stopped")

@@ -1,0 +1,114 @@
+{
+  "packageName": "com.google.android.gm",
+  "appName": "Gmail",
+  "versionCode": 2024011500,
+  "versionName": "2024.01.15",
+  "launcherActivity": "com.google.android.gm.ConversationListActivityGmail",
+  "mainActivities": ["com.google.android.gm.ConversationListActivityGmail", "com.google.android.gm.ComposeActivityGmail"],
+  "accessibilityLevel": "FULL",
+  "keyElements": {
+    "conversation_list": {
+      "role": "ListView",
+      "resourceIds": ["com.google.android.gm:id/conversation_list_view"],
+      "actionTypes": ["scroll"]
+    },
+    "compose_button": {
+      "role": "Button",
+      "resourceIds": ["com.google.android.gm:id/compose_button"],
+      "descriptionPatterns": ["Compose"],
+      "actionTypes": ["click"]
+    },
+    "search_button": {
+      "role": "Button",
+      "resourceIds": ["com.google.android.gm:id/action_search"],
+      "descriptionPatterns": ["Search"],
+      "actionTypes": ["click"]
+    },
+    "search_field": {
+      "role": "EditText",
+      "resourceIds": ["com.google.android.gm:id/search_box_text", "com.google.android.gm:id/search_omnibox_edit_text"],
+      "textPatterns": ["Search"],
+      "actionTypes": ["type"]
+    },
+    "navigation_drawer": {
+      "role": "NavigationView",
+      "resourceIds": ["com.google.android.gm:id/navigation_drawer"],
+      "descriptionPatterns": ["Open navigation drawer"],
+      "actionTypes": ["click"]
+    },
+    "to_field": {
+      "role": "EditText",
+      "resourceIds": ["com.google.android.gm:id/to"],
+      "actionTypes": ["type"]
+    },
+    "subject_field": {
+      "role": "EditText",
+      "resourceIds": ["com.google.android.gm:id/subject"],
+      "actionTypes": ["type"]
+    },
+    "body_field": {
+      "role": "EditText",
+      "resourceIds": ["com.google.android.gm:id/body"],
+      "actionTypes": ["type"]
+    },
+    "send_button": {
+      "role": "Button",
+      "descriptionPatterns": ["Send"],
+      "actionTypes": ["click"]
+    },
+    "email_row": {
+      "role": "FrameLayout",
+      "resourceIds": ["com.google.android.gm:id/conversation_row"],
+      "actionTypes": ["click"]
+    }
+  },
+  "navigationPatterns": {
+    "inbox_to_compose": {
+      "fromScreen": "inbox",
+      "toScreen": "compose",
+      "action": { "type": "tap", "params": { "targetRole": "compose_button" } },
+      "verification": { "type": "element_present", "params": { "targetRole": "to_field" } }
+    },
+    "inbox_to_search": {
+      "fromScreen": "inbox",
+      "toScreen": "search",
+      "action": { "type": "tap", "params": { "targetRole": "search_button" } },
+      "verification": { "type": "element_present", "params": { "targetRole": "search_field" } }
+    },
+    "compose_to_inbox": {
+      "fromScreen": "compose",
+      "toScreen": "inbox",
+      "action": { "type": "back", "params": {} },
+      "verification": { "type": "element_present", "params": { "targetRole": "conversation_list" } }
+    }
+  },
+  "workflows": {
+    "compose_send_email": {
+      "name": "compose_send_email",
+      "description": "Compose and send an email",
+      "triggers": ["email", "send", "compose", "mail"],
+      "startScreen": "inbox",
+      "steps": [
+        { "action": "tap", "targetRole": "compose_button", "verification": { "type": "element_present", "params": { "targetRole": "to_field" } } },
+        { "action": "type", "targetRole": "to_field", "params": { "text": "{{to}}" }, "verification": { "type": "text_contains", "params": { "targetRole": "to_field", "expected": "{{to}}" } } },
+        { "action": "type", "targetRole": "subject_field", "params": { "text": "{{subject}}" }, "verification": { "type": "text_contains", "params": { "targetRole": "subject_field", "expected": "{{subject}}" } } },
+        { "action": "type", "targetRole": "body_field", "params": { "text": "{{body}}" }, "verification": { "type": "text_contains", "params": { "targetRole": "body_field", "expected": "{{body}}" } } },
+        { "action": "tap", "targetRole": "send_button", "params": { "confirmed": "true" }, "verification": { "type": "screen_change", "params": {} }, "requiresConfirmation": true }
+      ],
+      "requiresConfirmation": true
+    },
+    "search_emails": {
+      "name": "search_emails",
+      "description": "Search emails",
+      "triggers": ["search", "find", "email"],
+      "startScreen": "inbox",
+      "steps": [
+        { "action": "tap", "targetRole": "search_button", "verification": { "type": "element_present", "params": { "targetRole": "search_field" } } },
+        { "action": "type", "targetRole": "search_field", "params": { "text": "{{query}}" }, "verification": { "type": "element_present", "params": { "targetRole": "conversation_list" } } }
+      ]
+    }
+  },
+  "commonDialogs": [],
+  "intents": {},
+  "deepLinks": {}
+}

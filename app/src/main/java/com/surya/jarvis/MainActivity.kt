@@ -229,6 +229,9 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun requestCorePermission(key: String) = runOnUiThread { requestCorePermissionInternal(key) }
+
+        @JavascriptInterface
+        fun openPermissionSettings(key: String) = runOnUiThread { openPermissionSettingsInternal(key) }
     }
 
     private fun requestVoiceStart() {
@@ -357,6 +360,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun openPermissionSettingsInternal(key: String) {
+        val intent = when (key) {
+            "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            "storage" -> null
+            "defaultAssistant" -> null
+            else -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = android.net.Uri.parse("package:$packageName")
+            }
+        }
+        when (key) {
+            "storage" -> {
+                val result = JarvisFileManager(this).openFullAccessSettings()
+                if (!result.first) runJs("showToast(${JSONObject.quote(result.second)})")
+            }
+            "defaultAssistant" -> requestDefaultAssistantRole()
+            else -> runCatching {
+                startActivity(intent)
+            }.onFailure { runJs("showToast('OPEN MARK APP SETTINGS MANUALLY')") }
+        }
+    }
+
     private fun requestSingleCorePermission(key: String, permission: String) {
         if (isCorePermissionGranted(key)) {
             runJs("showToast('PERMISSION ALREADY ENABLED')")
@@ -406,69 +430,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun permissionGroups(): Map<String, Array<String>> = mapOf(
-        "contacts" to arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS),
-        "calls" to arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE),
-        "sms" to arrayOf(Manifest.permission.SEND_SMS, Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS),
-        "calendar" to arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR),
-        "bluetooth" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) arrayOf(
-            Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE
-        ) else emptyArray(),
-        "callLog" to arrayOf(Manifest.permission.READ_CALL_LOG, Manifest.permission.WRITE_CALL_LOG),
-        "media" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) arrayOf(
-            Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_AUDIO
-        ) else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    )
-
-    private fun isAssistantPermissionGranted(key: String): Boolean {
-        if (key == "notifications") {
+    /**
+     * Only permissions declared by the hardened manifest are exposed here.
+     * Notification access is a special settings access, not a runtime permission.
+     */
+    private fun isAssistantPermissionGranted(key: String): Boolean = when (key) {
+        "notifications" -> {
             val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners").orEmpty()
             val component = ComponentName(this, JarvisNotificationListenerService::class.java).flattenToString()
-            return enabled.split(':').contains(component)
+            enabled.split(':').contains(component)
         }
-        if (key == "alarms") {
-            return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                getSystemService(android.app.AlarmManager::class.java)?.canScheduleExactAlarms() == true
-        }
-        val permissions = permissionGroups()[key] ?: return false
-        return permissions.isNotEmpty() && permissions.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }
+        else -> false
     }
 
     private fun assistantPermissionState(): JSONObject = JSONObject().apply {
-        listOf("contacts", "calls", "sms", "calendar", "bluetooth", "notifications", "callLog", "media", "alarms").forEach {
-            put(it, isAssistantPermissionGranted(it))
-        }
+        put("notifications", isAssistantPermissionGranted("notifications"))
     }
 
     private fun requestAssistantPermissionInternal(key: String) {
-        when (key) {
-            "notifications" -> runCatching {
-                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            }.onFailure { runJs("showToast('OPEN NOTIFICATION ACCESS SETTINGS MANUALLY')") }
-            "alarms" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                runCatching {
-                    startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:$packageName")))
-                }.onFailure { runJs("showToast('OPEN ALARM ACCESS SETTINGS MANUALLY')") }
-            } else runJs("showToast('EXACT ALARMS ARE AVAILABLE ON THIS ANDROID VERSION')")
-            else -> {
-                val permissions = permissionGroups()[key]
-                if (permissions == null) {
-                    runJs("showToast('UNKNOWN ASSISTANT PERMISSION')")
-                    return
-                }
-                val missing = permissions.filter {
-                    ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-                }.toTypedArray()
-                if (missing.isEmpty()) {
-                    runJs("showToast('PERMISSION ALREADY ENABLED')")
-                } else {
-                    pendingAssistantPermission = key
-                    assistantPermissionLauncher.launch(missing)
-                }
-            }
+        if (key != "notifications") {
+            runJs("showToast('THIS MARK CAPABILITY IS NOT ENABLED IN THIS BUILD')")
+            return
         }
+        runCatching {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }.onFailure { runJs("showToast('OPEN NOTIFICATION ACCESS SETTINGS MANUALLY')") }
     }
 
     private fun sendMessageToBackend(message: String) {
@@ -600,7 +586,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        JarvisFileManager(this).syncFullAccessState()
         runJs("applyNativeSettings();updateAssistantPermissionState()")
     }
 
@@ -610,12 +595,12 @@ class MainActivity : AppCompatActivity() {
             addAction(JarvisVoiceForegroundService.ACTION_STATUS)
             addAction(JarvisVoiceForegroundService.ACTION_USER_SPEECH)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(voiceReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(voiceReceiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            this,
+            voiceReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         receiverRegistered = true
     }
 
